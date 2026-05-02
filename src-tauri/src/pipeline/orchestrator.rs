@@ -82,17 +82,54 @@ pub fn detect_vehicles_in_frames(
             det.detect(&f.image)?
         };
 
-        // 只保留我们关心的车辆类别
-        let mut vehicles: Vec<VehicleObservation> = det_result
-            .detections
+        // 只保留我们关心的车辆类别 (filter+masks 同步)
+        let det_result_clone_masks = det_result.masks.clone();
+        let zipped: Vec<(crate::models::detection::Detection, Option<image::GrayImage>)> =
+            det_result
+                .detections
+                .into_iter()
+                .zip(det_result_clone_masks.into_iter())
+                .filter(|(d, _)| RELEVANT_CLASSES.contains(&d.class_id))
+                .collect();
+
+        // 计算 sidewalk mask + IoU (P3)
+        let sidewalk = match crate::ai::sidewalk::segmenter() {
+            Ok(seg) => match seg.lock() {
+                Ok(mut s) => match s.segment_sidewalk(&f.image) {
+                    Ok(m) => Some(m),
+                    Err(e) => {
+                        tracing::warn!(error = %e, "SegFormer 推理失败, 跳过本帧 IoU");
+                        None
+                    }
+                },
+                Err(e) => {
+                    tracing::warn!(error = %e, "SegFormer mutex 中毒");
+                    None
+                }
+            },
+            Err(e) => {
+                tracing::warn!(error = %e, "SegFormer 未加载, 跳过 IoU");
+                None
+            }
+        };
+
+        let mut vehicles: Vec<VehicleObservation> = zipped
             .into_iter()
-            .filter(|d| RELEVANT_CLASSES.contains(&d.class_id))
-            .map(|d| VehicleObservation {
-                class_id: d.class_id,
-                class_name: d.class_name,
-                vehicle_score: d.score,
-                bbox: d.bbox,
-                plate: None,
+            .map(|(d, mask)| {
+                let iou_score = match (&mask, &sidewalk) {
+                    (Some(vm), Some(sm)) => {
+                        crate::ai::judge::intersection_over_vehicle(vm, sm).ok()
+                    }
+                    _ => None,
+                };
+                VehicleObservation {
+                    class_id: d.class_id,
+                    class_name: d.class_name,
+                    vehicle_score: d.score,
+                    bbox: d.bbox,
+                    iou_score,
+                    plate: None,
+                }
             })
             .collect();
 

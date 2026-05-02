@@ -8,7 +8,9 @@ import {
   processVideo,
   type VideoMetadata,
   type ProcessOutcome,
+  type ParkingEvent,
 } from "@/api/video";
+import { openInFileManager } from "@/api/system";
 
 const videoPath = ref<string | null>(null);
 const metaLoading = ref(false);
@@ -84,6 +86,27 @@ function formatSec(s: number): string {
 function formatTimestamp(ms: number): string {
   const s = ms / 1000;
   return `${s.toFixed(1)}s`;
+}
+
+function evidenceFolder(e: ParkingEvent): string | null {
+  const p = e.snapshot_path ?? e.clip_path;
+  if (!p) return null;
+  const idx = Math.max(p.lastIndexOf("/"), p.lastIndexOf("\\"));
+  if (idx <= 0) return null;
+  return p.substring(0, idx);
+}
+
+async function openEvidence(e: ParkingEvent) {
+  const f = evidenceFolder(e);
+  if (!f) {
+    ElMessage.warning("该事件未生成证据包");
+    return;
+  }
+  try {
+    await openInFileManager(f);
+  } catch (err) {
+    ElMessage.error(String(err));
+  }
 }
 </script>
 
@@ -188,7 +211,28 @@ function formatTimestamp(ms: number): string {
             </template>
           </el-table-column>
           <el-table-column prop="frame_hits" label="帧数" width="80" />
+          <el-table-column label="IoU" width="80">
+            <template #default="{ row }">
+              <span v-if="row.iou_score !== null">
+                {{ (row.iou_score * 100).toFixed(0) }}%
+              </span>
+              <span v-else>—</span>
+            </template>
+          </el-table-column>
           <el-table-column prop="event_time" label="事件时间" />
+          <el-table-column label="证据" width="100">
+            <template #default="{ row }">
+              <el-button
+                v-if="evidenceFolder(row)"
+                size="small"
+                type="primary"
+                @click="openEvidence(row)"
+              >
+                打开
+              </el-button>
+              <span v-else>—</span>
+            </template>
+          </el-table-column>
         </el-table>
         <el-empty v-else description="未识别到符合条件的事件" />
 

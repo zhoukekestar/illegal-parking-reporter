@@ -2,6 +2,8 @@
 import { ref, onMounted, computed } from "vue";
 
 import { listEvents, type ParkingEvent } from "@/api/video";
+import { openInFileManager } from "@/api/system";
+import { ElMessage } from "element-plus";
 
 const events = ref<ParkingEvent[]>([]);
 const loading = ref(false);
@@ -40,6 +42,28 @@ function formatTimestamp(ms: number): string {
 function shortPath(p: string): string {
   const parts = p.split(/[/\\]/);
   return parts[parts.length - 1] || p;
+}
+
+function evidenceFolder(e: ParkingEvent): string | null {
+  // snapshot_path / clip_path 同处一个目录, 取 snapshot 的 parent
+  const p = e.snapshot_path ?? e.clip_path;
+  if (!p) return null;
+  const idx = Math.max(p.lastIndexOf("/"), p.lastIndexOf("\\"));
+  if (idx <= 0) return null;
+  return p.substring(0, idx);
+}
+
+async function openEvidence(e: ParkingEvent) {
+  const folder = evidenceFolder(e);
+  if (!folder) {
+    ElMessage.warning("该事件未生成证据包");
+    return;
+  }
+  try {
+    await openInFileManager(folder);
+  } catch (err) {
+    ElMessage.error(String(err));
+  }
 }
 </script>
 
@@ -118,6 +142,27 @@ function shortPath(p: string): string {
             </el-tag>
           </template>
         </el-table-column>
+        <el-table-column label="IoU" width="80">
+          <template #default="{ row }">
+            <span v-if="row.iou_score !== null">
+              {{ (row.iou_score * 100).toFixed(0) }}%
+            </span>
+            <span v-else>—</span>
+          </template>
+        </el-table-column>
+        <el-table-column label="证据" width="120">
+          <template #default="{ row }">
+            <el-button
+              v-if="evidenceFolder(row)"
+              size="small"
+              type="primary"
+              @click="openEvidence(row)"
+            >
+              打开
+            </el-button>
+            <span v-else class="muted-inline">—</span>
+          </template>
+        </el-table-column>
       </el-table>
     </el-card>
   </div>
@@ -150,5 +195,9 @@ h2 {
   gap: 12px;
   align-items: center;
   margin: 16px 0;
+}
+
+.muted-inline {
+  color: var(--el-text-color-secondary);
 }
 </style>

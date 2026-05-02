@@ -79,4 +79,9 @@ impl ModelStatus {
 }
 
 /// 路径常量, 集中维护
-pub const YOLOV8_FILENAME: &str = "yolov8n.onnx";
+///
+/// P3 起 YOLOv8 升级到 -seg 版本, 同时输出车辆掩膜
+pub const YOLOV8_FILENAME: &str = "yolov8n-seg.onnx";
+
+/// SegFormer-B0 (P3): ADE20K 语义分割, 用于人行道掩膜
+pub const SEGFORMER_FILENAME: &str = "segformer/model.onnx";

@@ -25,6 +25,8 @@ pub struct VehicleObservation {
     pub vehicle_score: f32,
     /// 车辆框 [x1, y1, x2, y2] 像素坐标
     pub bbox: [f32; 4],
+    /// 车辆掩膜 ∩ 人行道掩膜 / 车辆掩膜面积; P3 起填充
+    pub iou_score: Option<f32>,
     /// 在该车上识别到的车牌, P1.MVU 4 阶段全部为 None, MVU 5 填充
     pub plate: Option<PlateReading>,
 }

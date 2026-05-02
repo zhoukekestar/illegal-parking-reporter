@@ -29,6 +29,10 @@ src-tauri/gen/
 # 本地模型 (体积大, 单独管理)
 src-tauri/models/*.onnx
 src-tauri/models/**/*.onnx
+# segformer 子目录: optimum-cli 导出的全套 (config + onnx), 都不入库
+src-tauri/models/segformer/
+# pipeline DB / evidence 输出 (开发期生成)
+src-tauri/.local/
 # ultralytics 导出 ONNX 时下载的源权重, 不入库
 *.pt
 *.pth

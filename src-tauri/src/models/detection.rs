@@ -16,7 +16,7 @@ pub struct Detection {
 }
 
 /// 单次检测调用的整体结果
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct DetectionResult {
     /// 推理总耗时 (毫秒, 不含图片解码)
     pub inference_ms: u64,
@@ -26,4 +26,9 @@ pub struct DetectionResult {
     pub image_height: u32,
     /// 所有保留的检测框 (已 NMS, 按置信度降序)
     pub detections: Vec<Detection>,
+    /// 与 detections 一一对应的二值掩膜 (P3 起 yolov8n-seg 输出),
+    /// 像素值: 0 (背景) / 255 (车辆); 与原图同尺寸
+    /// 不序列化到前端 (体积大且前端用不上)
+    #[serde(skip)]
+    pub masks: Vec<Option<image::GrayImage>>,
 }

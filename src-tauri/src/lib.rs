@@ -11,6 +11,7 @@
 pub mod ai;
 pub mod commands;
 pub mod db;
+pub mod evidence;
 pub mod models;
 pub mod pipeline;
 pub mod video;
@@ -59,6 +60,7 @@ pub fn run() {
         .plugin(tauri_plugin_fs::init())
         .invoke_handler(tauri::generate_handler![
             commands::system::check_system_status,
+            commands::system::open_in_file_manager,
             commands::detection::detect_demo,
             commands::video::read_video_metadata,
             commands::video::process_video,

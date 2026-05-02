@@ -2,6 +2,7 @@
 // P1: 元数据读取 / 1fps 抽帧 / EXIF 旋转
 // P3: 剪辑 / 时间戳水印
 
+pub mod clip;
 pub mod extract;
 pub mod metadata;
 

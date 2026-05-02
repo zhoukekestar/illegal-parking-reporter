@@ -440,10 +440,30 @@ async fn process_one_job(
                 total: total_frames,
             },
         );
-        let events = aggregate_events(&path_s3, &all, event_time_base, 60_000);
+        let mut events = aggregate_events(&path_s3, &all, event_time_base, 60_000);
         let events_count = events.len() as u32;
 
-        // DB 写入
+        // P3: 给每个事件生成证据包 (截图 + 6s 视频 + 信息.txt)
+        // 失败仅日志, 事件依然入库 (snapshot/clip path 留空)
+        for evt in events.iter_mut() {
+            let path_clone = path_s3.clone();
+            let evt_clone = evt.clone();
+            let res = tokio::task::spawn_blocking(move || -> Result<crate::evidence::builder::EvidencePaths> {
+                crate::evidence::builder::build_for_event(&evt_clone, &path_clone)
+            })
+            .await
+            .map_err(|e| anyhow::anyhow!("evidence build task panic: {e}"));
+            match res {
+                Ok(Ok(paths)) => {
+                    evt.snapshot_path = Some(paths.snapshot.to_string_lossy().to_string());
+                    evt.clip_path = Some(paths.clip.to_string_lossy().to_string());
+                }
+                Ok(Err(e)) => tracing::warn!(error = %e, event = %evt.id, "证据包构建失败"),
+                Err(e) => tracing::warn!(error = %e, event = %evt.id, "证据包构建 task panic"),
+            }
+        }
+
+        // DB 写入 (含 snapshot_path/clip_path)
         if !events.is_empty() {
             let events_clone = events.clone();
             tokio::task::spawn_blocking(move || -> Result<()> {
@@ -494,18 +514,48 @@ fn infer_one_frame(extracted: ExtractedFrame) -> Result<FrameObservation> {
         det.detect(&extracted.image)?
     };
 
-    let mut vehicles: Vec<VehicleObservation> = det_result
+    // YOLOv8-seg 同时返回 detections 和 masks (1:1 对应)
+    let det_masks = det_result.masks.clone();
+    let zipped: Vec<(crate::models::detection::Detection, Option<image::GrayImage>)> = det_result
         .detections
         .into_iter()
-        .filter(|d| RELEVANT_CLASSES.contains(&d.class_id))
-        .map(|d| VehicleObservation {
-            class_id: d.class_id,
-            class_name: d.class_name,
-            vehicle_score: d.score,
-            bbox: d.bbox,
-            plate: None,
+        .zip(det_masks.into_iter())
+        .filter(|(d, _)| RELEVANT_CLASSES.contains(&d.class_id))
+        .collect();
+
+    // 人行道掩膜 (P3)
+    let sidewalk = match crate::ai::sidewalk::segmenter() {
+        Ok(seg) => seg
+            .lock()
+            .ok()
+            .and_then(|mut s| s.segment_sidewalk(&extracted.image).ok()),
+        Err(e) => {
+            tracing::warn!(error = %e, "SegFormer 未加载");
+            None
+        }
+    };
+
+    let mut vehicles: Vec<VehicleObservation> = zipped
+        .into_iter()
+        .map(|(d, mask)| {
+            let iou_score = match (&mask, &sidewalk) {
+                (Some(vm), Some(sm)) => crate::ai::judge::intersection_over_vehicle(vm, sm).ok(),
+                _ => None,
+            };
+            VehicleObservation {
+                class_id: d.class_id,
+                class_name: d.class_name,
+                vehicle_score: d.score,
+                bbox: d.bbox,
+                iou_score,
+                plate: None,
+            }
         })
         .collect();
+
+    // P3: 只保留 iou_score >= 阈值 的车辆 (无 mask 时不过滤, 留给 P1 调试路径)
+    let thr = crate::ai::judge::DEFAULT_THRESHOLD;
+    vehicles.retain(|v| v.iou_score.map(|s| s >= thr).unwrap_or(true));
 
     if !vehicles.is_empty() {
         if let Err(e) = crate::ai::plate::recognize_into(&extracted.image, &mut vehicles) {

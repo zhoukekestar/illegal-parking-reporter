@@ -20,3 +20,8 @@ export interface SystemStatus {
 export async function checkSystemStatus(): Promise<SystemStatus> {
   return invoke<SystemStatus>("check_system_status");
 }
+
+/** 在 Finder 打开证据文件夹 (P3) */
+export async function openInFileManager(path: string): Promise<void> {
+  await invoke("open_in_file_manager", { path });
+}

@@ -144,7 +144,7 @@ fn build_event(
         last_seen_ms,
         frame_hits: samples.len() as u32,
         review_status: ReviewStatus::default(),
-        iou_score: None,
+        iou_score: representative.vehicle.iou_score,
         snapshot_path: None,
         clip_path: None,
     }
@@ -167,6 +167,7 @@ mod tests {
                 class_name: "car".to_string(),
                 vehicle_score: 0.9,
                 bbox: [10.0, 20.0, 110.0, 120.0],
+                iou_score: Some(0.5),
                 plate: plate.map(|t| PlateReading {
                     text: t.to_string(),
                     confidence: conf,
