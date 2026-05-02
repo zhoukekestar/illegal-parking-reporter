@@ -1,15 +1,19 @@
 // 路况记录助手 - Rust 后端入口
 //
-// 当前阶段: P0 (工程脚手架)
+// 当前阶段: P1 (单视频识别 pipeline)
 // 已挂载模块:
-//   - ai::model_path  模型路径解析
-//   - ai::vehicle     YOLOv8 推理
-//   - commands::system    系统/模型状态检查
-//   - commands::detection P0 demo 推理命令
+//   - ai::vehicle / ai::plate / ai::model_path
+//   - video::metadata / video::extract
+//   - pipeline::orchestrator / pipeline::aggregate
+//   - db (SQLite 持久化, P6 升级 SQLCipher)
+//   - commands::{system, detection, video}
 
 pub mod ai;
 pub mod commands;
+pub mod db;
 pub mod models;
+pub mod pipeline;
+pub mod video;
 
 use tracing_subscriber::EnvFilter;
 
@@ -28,7 +32,13 @@ pub fn run() {
     init_logging();
     tracing::info!(version = env!("CARGO_PKG_VERSION"), "路况记录助手启动");
 
-    // 注意: ort 用 load-dynamic 模式时会读 ORT_DYLIB_PATH
+    if let Err(e) = video::init() {
+        tracing::error!(error = %e, "ffmpeg 初始化失败, 视频功能将不可用");
+    }
+    if let Err(e) = db::init() {
+        tracing::error!(error = %e, "数据库初始化失败, 持久化功能将不可用");
+    }
+
     if std::env::var("ORT_DYLIB_PATH").is_err() {
         tracing::warn!(
             "ORT_DYLIB_PATH 未设置, ort 加载会失败. \
@@ -43,6 +53,10 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             commands::system::check_system_status,
             commands::detection::detect_demo,
+            commands::video::read_video_metadata,
+            commands::video::process_video,
+            commands::video::list_events,
+            commands::video::detect_plate_demo,
         ])
         .run(tauri::generate_context!())
         .expect("启动 Tauri 应用失败");

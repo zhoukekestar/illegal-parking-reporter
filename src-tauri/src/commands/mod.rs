@@ -3,3 +3,4 @@
 
 pub mod detection;
 pub mod system;
+pub mod video;

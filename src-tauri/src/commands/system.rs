@@ -1,6 +1,7 @@
 use serde::Serialize;
 
 use crate::ai::model_path::{ModelStatus, YOLOV8_FILENAME};
+use crate::ai::plate::{DETECTOR_FILENAME as PLATE_DET_FILE, RECOGNIZER_FILENAME as PLATE_REC_FILE};
 
 #[derive(Debug, Serialize)]
 pub struct SystemStatus {
@@ -13,12 +14,13 @@ pub struct SystemStatus {
 }
 
 /// 检查所有模型与运行时是否就绪
-///
-/// P0 阶段只检查 yolov8n.onnx,
-/// P1 起会追加 hyperlpr3, P3 起追加 segformer
 #[tauri::command]
 pub fn check_system_status() -> SystemStatus {
-    let models = vec![ModelStatus::check("YOLOv8", YOLOV8_FILENAME)];
+    let models = vec![
+        ModelStatus::check("YOLOv8 (车辆)", YOLOV8_FILENAME),
+        ModelStatus::check("HyperLPR3 检测器", PLATE_DET_FILE),
+        ModelStatus::check("HyperLPR3 识别器", PLATE_REC_FILE),
+    ];
     let ort_dylib_path = std::env::var("ORT_DYLIB_PATH").ok();
 
     SystemStatus {

@@ -19,6 +19,18 @@ const routes: RouteRecordRaw[] = [
     meta: { title: "图片检测", icon: "Picture" },
   },
   {
+    path: "/process",
+    name: "process",
+    component: () => import("@/views/ProcessView.vue"),
+    meta: { title: "视频处理", icon: "VideoPlay" },
+  },
+  {
+    path: "/events",
+    name: "events",
+    component: () => import("@/views/EventsView.vue"),
+    meta: { title: "事件列表", icon: "List" },
+  },
+  {
     path: "/settings",
     name: "settings",
     component: () => import("@/views/SettingsView.vue"),

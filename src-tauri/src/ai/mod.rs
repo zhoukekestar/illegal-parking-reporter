@@ -4,4 +4,5 @@
 // P3+: sidewalk (SegFormer) + judge (IoU)
 
 pub mod model_path;
+pub mod plate;
 pub mod vehicle;

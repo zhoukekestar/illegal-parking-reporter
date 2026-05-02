@@ -42,6 +42,14 @@ ndarray = "0.16"
 # 图像处理
 image = { version = "0.25", default-features = false, features = ["jpeg", "png", "webp"] }
 
+# 视频处理 (P1 起): 抽帧 / 元数据 / 剪辑
+# 与系统 ffmpeg 8.1 (libavutil 60.x / libavcodec 62.x) 严格对应
+ffmpeg-next = "8"
+
+# SQLite (P1 简化, P6 升级到 SQLCipher)
+# bundled feature 自带 sqlite, 不依赖系统 lib
+rusqlite = { version = "0.32", features = ["bundled"] }
+
 # 工具
 once_cell = "1"
 uuid = { version = "1", features = ["v4", "serde"] }
