@@ -1,0 +1,2 @@
+# 此目录存放本地 ONNX 模型文件 (yolov8n.onnx 等), .onnx 已被根目录 .gitignore 排除
+# P0 阶段需要的模型: yolov8n.onnx, 详见 docs/MODELS.md

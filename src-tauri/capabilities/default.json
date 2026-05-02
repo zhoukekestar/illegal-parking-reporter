@@ -1,0 +1,12 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "default",
+  "description": "默认权限集 - MVU 1 仅开放最基础的 core 与对话框/文件读取",
+  "windows": ["main"],
+  "permissions": [
+    "core:default",
+    "core:app:allow-version",
+    "dialog:default",
+    "fs:default"
+  ]
+}
