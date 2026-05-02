@@ -81,3 +81,17 @@ export async function listEvents(): Promise<ParkingEvent[]> {
 export async function detectPlateDemo(imagePath: string): Promise<PlateReading[]> {
   return invoke<PlateReading[]>("detect_plate_demo", { imagePath });
 }
+
+export async function updateEventStatus(
+  eventId: string,
+  status: ParkingEvent["review_status"]
+): Promise<void> {
+  await invoke("update_event_status", { eventId, status });
+}
+
+export async function updateEventPlate(
+  eventId: string,
+  corrected: string | null
+): Promise<void> {
+  await invoke("update_event_plate", { eventId, corrected });
+}

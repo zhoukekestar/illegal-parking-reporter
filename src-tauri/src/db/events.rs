@@ -82,6 +82,36 @@ pub fn list_all(conn: &Connection) -> Result<Vec<ParkingEvent>> {
     Ok(out)
 }
 
+pub fn update_review_status(
+    conn: &Connection,
+    event_id: &str,
+    status: ReviewStatus,
+) -> Result<()> {
+    let n = conn.execute(
+        "UPDATE events SET review_status = ?1 WHERE id = ?2",
+        params![status.as_str(), event_id],
+    )?;
+    if n == 0 {
+        anyhow::bail!("找不到事件 id={event_id}");
+    }
+    Ok(())
+}
+
+pub fn update_plate_correction(
+    conn: &Connection,
+    event_id: &str,
+    corrected: Option<&str>,
+) -> Result<()> {
+    let n = conn.execute(
+        "UPDATE events SET plate_manual_corrected = ?1 WHERE id = ?2",
+        params![corrected, event_id],
+    )?;
+    if n == 0 {
+        anyhow::bail!("找不到事件 id={event_id}");
+    }
+    Ok(())
+}
+
 pub fn list_by_source_video(conn: &Connection, source_video: &str) -> Result<Vec<ParkingEvent>> {
     let mut stmt = conn.prepare(
         r#"SELECT id, source_video, representative_frame_index, timestamp_ms, event_time,

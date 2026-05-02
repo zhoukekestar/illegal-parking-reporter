@@ -31,6 +31,12 @@ const routes: RouteRecordRaw[] = [
     meta: { title: "批量处理", icon: "Loading" },
   },
   {
+    path: "/review",
+    name: "review",
+    component: () => import("@/views/ReviewView.vue"),
+    meta: { title: "审核 (P4)", icon: "View" },
+  },
+  {
     path: "/events",
     name: "events",
     component: () => import("@/views/EventsView.vue"),

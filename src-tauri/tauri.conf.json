@@ -22,7 +22,18 @@
       }
     ],
     "security": {
-      "csp": null
+      "csp": null,
+      "assetProtocol": {
+        "enable": true,
+        "scope": [
+          "$APPDATA/路况记录助手/evidence/**",
+          "$RESOURCE/**",
+          "**/illegal-parking-reporter/.local/evidence/**",
+          "/private/var/folders/**",
+          "/var/folders/**",
+          "$HOME/Library/Application Support/路况记录助手/**"
+        ]
+      }
     }
   },
   "bundle": {

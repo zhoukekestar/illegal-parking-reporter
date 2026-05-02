@@ -72,6 +72,40 @@ pub async fn list_events() -> Result<Vec<ParkingEvent>, String> {
     .map_err(|e| format!("查询事件失败: {e:#}"))
 }
 
+/// 修改事件审核状态 (P4)
+#[tauri::command]
+pub async fn update_event_status(
+    event_id: String,
+    status: String,
+) -> Result<(), String> {
+    let parsed = crate::models::event::ReviewStatus::parse(&status)
+        .ok_or_else(|| format!("非法 status: {status}"))?;
+    tokio::task::spawn_blocking(move || -> anyhow::Result<()> {
+        let lock = crate::db::conn()?;
+        let conn = lock.lock().map_err(|e| anyhow::anyhow!("DB mutex 中毒: {e}"))?;
+        crate::db::events::update_review_status(&conn, &event_id, parsed)
+    })
+    .await
+    .map_err(|e| format!("blocking task panic: {e}"))?
+    .map_err(|e| format!("更新状态失败: {e:#}"))
+}
+
+/// 修改事件人工车牌 (P4)
+#[tauri::command]
+pub async fn update_event_plate(
+    event_id: String,
+    corrected: Option<String>,
+) -> Result<(), String> {
+    tokio::task::spawn_blocking(move || -> anyhow::Result<()> {
+        let lock = crate::db::conn()?;
+        let conn = lock.lock().map_err(|e| anyhow::anyhow!("DB mutex 中毒: {e}"))?;
+        crate::db::events::update_plate_correction(&conn, &event_id, corrected.as_deref())
+    })
+    .await
+    .map_err(|e| format!("blocking task panic: {e}"))?
+    .map_err(|e| format!("更新车牌失败: {e:#}"))
+}
+
 /// 单图车牌检测 + 识别 (MVU 5 demo)
 #[tauri::command]
 pub async fn detect_plate_demo(image_path: String) -> Result<Vec<crate::models::observation::PlateReading>, String> {

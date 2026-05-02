@@ -15,9 +15,10 @@ interface MenuItem {
 const items: MenuItem[] = [
   { path: "/home", title: "首页" },
   { path: "/processing", title: "批量处理 (P2)" },
+  { path: "/review", title: "审核 (P4)" },
+  { path: "/events", title: "事件列表" },
   { path: "/process", title: "单视频调试 (P1)" },
   { path: "/detect", title: "图片检测 (P0)" },
-  { path: "/events", title: "事件列表" },
   { path: "/settings", title: "设置" },
 ];
 

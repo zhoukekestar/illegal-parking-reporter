@@ -66,6 +66,8 @@ pub fn run() {
             commands::video::process_video,
             commands::video::list_events,
             commands::video::detect_plate_demo,
+            commands::video::update_event_status,
+            commands::video::update_event_plate,
             commands::pipeline::start_batch_pipeline,
             commands::pipeline::resume_pending_jobs,
             commands::pipeline::list_jobs,
