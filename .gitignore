@@ -29,6 +29,9 @@ src-tauri/gen/
 # 本地模型 (体积大, 单独管理)
 src-tauri/models/*.onnx
 src-tauri/models/**/*.onnx
+# ultralytics 导出 ONNX 时下载的源权重, 不入库
+*.pt
+*.pth
 
 # 临时文件
 *.tmp
