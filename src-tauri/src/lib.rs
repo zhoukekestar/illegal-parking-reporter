@@ -43,13 +43,35 @@ pub fn run() {
         }
     };
 
+    // db init: 失败时检测是否为旧 plain DB, 自动备份重建
     if let Err(e) = db::init(cipher_key_hex.as_deref()) {
-        tracing::error!(error = %e, "数据库初始化失败");
-    } else {
-        if let Ok(lock) = db::conn() {
-            if let Ok(conn) = lock.lock() {
-                let _ = db::jobs::reset_running_to_pending(&conn);
+        let msg = format!("{e:#}");
+        let looks_like_plain = msg.contains("not a database")
+            || msg.contains("file is encrypted")
+            || msg.contains("not encrypted");
+        if looks_like_plain {
+            if let Ok(p) = db::db_path() {
+                let backup = p.with_extension("plain.bak");
+                tracing::warn!(
+                    path = ?p,
+                    backup = ?backup,
+                    "检测到旧 plain SQLite (P0-P5 遗留), 备份并重建为 SQLCipher 加密 DB"
+                );
+                let _ = std::fs::rename(&p, &backup);
+                // 顺便清掉同目录可能残留的 -wal / -shm
+                let _ = std::fs::remove_file(p.with_extension("sqlite-wal"));
+                let _ = std::fs::remove_file(p.with_extension("sqlite-shm"));
+                if let Err(e2) = db::init(cipher_key_hex.as_deref()) {
+                    tracing::error!(error = %e2, "重建数据库失败");
+                }
             }
+        } else {
+            tracing::error!(error = %e, "数据库初始化失败");
+        }
+    }
+    if let Ok(lock) = db::conn() {
+        if let Ok(conn) = lock.lock() {
+            let _ = db::jobs::reset_running_to_pending(&conn);
         }
     }
 

@@ -168,11 +168,20 @@ pub fn export_diagnostic_bundle(target_dir: &Path) -> Result<DiagnosticReport> {
     })
 }
 
-/// 模型预热: 后台 spawn_blocking 触发 OnceCell 初始化, 让首帧推理快
+/// 模型预热: 后台普通线程触发 OnceCell 初始化, 让首帧推理快
+///
+/// 注意: 不能用 tokio::task::spawn_blocking, 因为 Tauri 2 的 Builder::setup
+/// 闭包在 tao 主线程而非 tokio runtime 内. Detector::load 本身是同步的,
+/// 用 std::thread 即可.
 pub fn spawn_warmup() {
-    tokio::task::spawn_blocking(|| {
-        tracing::info!("开始预热 AI 模型 (后台)");
-        let _ = crate::ai::vehicle::detector();
-        // plate / sidewalk 留首次调用时延迟加载, 避免占用太多内存
-    });
+    std::thread::Builder::new()
+        .name("ai-warmup".to_string())
+        .spawn(|| {
+            tracing::info!("开始预热 AI 模型 (后台线程)");
+            if let Err(e) = crate::ai::vehicle::detector() {
+                tracing::warn!(error = %e, "YOLOv8 预热失败 (推理时会重试)");
+            }
+            // plate / sidewalk 留首次调用时延迟加载, 避免占用太多内存
+        })
+        .ok();
 }
