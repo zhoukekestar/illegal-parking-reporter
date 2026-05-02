@@ -1,14 +1,9 @@
 // 路况记录助手 - Rust 后端入口
 //
-// 当前阶段: P2 (批量并发流水线)
-// 已挂载模块:
-//   - ai::vehicle / ai::plate / ai::model_path
-//   - video::metadata / video::extract
-//   - pipeline::orchestrator (P1 单视频) / pipeline::parallel (P2 批处理)
-//   - db (events + video_jobs)
-//   - commands::{system, detection, video, pipeline}
+// 当前阶段: P6 (本地登录 + 设置 + SQLCipher 加密)
 
 pub mod ai;
+pub mod auth;
 pub mod commands;
 pub mod db;
 pub mod evidence;
@@ -33,13 +28,29 @@ pub fn run() {
     init_logging();
     tracing::info!(version = env!("CARGO_PKG_VERSION"), "路况记录助手启动");
 
+    // 初始化 ffmpeg
     if let Err(e) = video::init() {
         tracing::error!(error = %e, "ffmpeg 初始化失败, 视频功能将不可用");
     }
-    if let Err(e) = db::init() {
-        tracing::error!(error = %e, "数据库初始化失败, 持久化功能将不可用");
+
+    // 加载/初始化 auth.json + 派生 SQLCipher key (无密码时用 secret 直接做 key)
+    let cipher_key_hex = match auth::load_or_init() {
+        Ok(a) => match auth::derive_sqlcipher_key(&a, None) {
+            Ok(k) => Some(k),
+            Err(e) => {
+                tracing::error!(error = %e, "派生 SQLCipher key 失败, 退化为 plain DB");
+                None
+            }
+        },
+        Err(e) => {
+            tracing::error!(error = %e, "加载 auth.json 失败");
+            None
+        }
+    };
+
+    if let Err(e) = db::init(cipher_key_hex.as_deref()) {
+        tracing::error!(error = %e, "数据库初始化失败");
     } else {
-        // 启动恢复: 把残留的 running 任务重置为 pending, 等待用户在 UI 点续跑
         if let Ok(lock) = db::conn() {
             if let Ok(conn) = lock.lock() {
                 let _ = db::jobs::reset_running_to_pending(&conn);
@@ -50,7 +61,6 @@ pub fn run() {
     if std::env::var("ORT_DYLIB_PATH").is_err() {
         tracing::warn!(
             "ORT_DYLIB_PATH 未设置, ort 加载会失败. \
-             请在 ~/.zshrc 加: \
              export ORT_DYLIB_PATH=/opt/homebrew/lib/libonnxruntime.dylib"
         );
     }
@@ -73,6 +83,13 @@ pub fn run() {
             commands::pipeline::list_jobs,
             commands::pipeline::list_pending_jobs,
             commands::export::export_accepted_events,
+            commands::auth::auth_state,
+            commands::auth::set_password,
+            commands::auth::unlock,
+            commands::auth::lock,
+            commands::auth::get_settings,
+            commands::auth::save_settings,
+            commands::auth::purge_data,
         ])
         .run(tauri::generate_context!())
         .expect("启动 Tauri 应用失败");

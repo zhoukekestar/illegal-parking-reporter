@@ -6,7 +6,7 @@
 use anyhow::Result;
 use rusqlite::Connection;
 
-const SCHEMA_VERSION: i32 = 3;
+const SCHEMA_VERSION: i32 = 4;
 
 pub fn run_migrations(conn: &Connection) -> Result<()> {
     conn.execute(
@@ -38,6 +38,10 @@ pub fn run_migrations(conn: &Connection) -> Result<()> {
     if current < 3 {
         conn.execute_batch(SCHEMA_V3)?;
         tracing::info!("schema 升级到 v3 (events.exported_*)");
+    }
+    if current < 4 {
+        crate::db::settings::ensure_schema(conn)?;
+        tracing::info!("schema 升级到 v4 (settings)");
     }
 
     if current < SCHEMA_VERSION {

@@ -46,9 +46,14 @@ image = { version = "0.25", default-features = false, features = ["jpeg", "png",
 # 与系统 ffmpeg 8.1 (libavutil 60.x / libavcodec 62.x) 严格对应
 ffmpeg-next = "8"
 
-# SQLite (P1 简化, P6 升级到 SQLCipher)
-# bundled feature 自带 sqlite, 不依赖系统 lib
-rusqlite = { version = "0.32", features = ["bundled"] }
+# SQLite + SQLCipher (P6: 加密本地数据库)
+# bundled-sqlcipher-vendored-openssl: SQLCipher + OpenSSL 都内置编译, 零外部依赖
+rusqlite = { version = "0.32", features = ["bundled-sqlcipher-vendored-openssl"] }
+
+# 密码哈希 (P6)
+argon2 = "0.5"
+rand = "0.8"
+hex = "0.4"
 
 # 工具
 once_cell = "1"

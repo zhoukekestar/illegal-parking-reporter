@@ -1,9 +1,13 @@
 <script setup lang="ts">
-import { computed } from "vue";
+import { computed, ref, onMounted } from "vue";
 import { useRoute, useRouter } from "vue-router";
+import { ElMessage } from "element-plus";
+
+import { authApi } from "@/api/auth";
 
 const router = useRouter();
 const route = useRoute();
+const hasPassword = ref(false);
 
 const activeMenu = computed(() => route.path);
 
@@ -28,6 +32,26 @@ function go(path: string) {
     router.push(path);
   }
 }
+
+onMounted(async () => {
+  try {
+    const a = await authApi.state();
+    hasPassword.value = a.has_password;
+  } catch (_) {}
+});
+
+async function lock() {
+  if (!hasPassword.value) {
+    ElMessage.info("请先在设置中设置密码再锁定");
+    return;
+  }
+  try {
+    await authApi.lock();
+    location.reload();
+  } catch (e) {
+    ElMessage.error(String(e));
+  }
+}
 </script>
 
 <template>
@@ -35,17 +59,30 @@ function go(path: string) {
     <el-aside width="200px" class="aside">
       <div class="logo">
         <div class="logo-name">路况记录助手</div>
-        <div class="logo-stage">P0 / 工程脚手架</div>
+        <div class="logo-stage">P0 → P6 (本地优先 / 不联网)</div>
       </div>
       <el-menu :default-active="activeMenu" class="menu" @select="go">
         <el-menu-item v-for="it in items" :key="it.path" :index="it.path">
           {{ it.title }}
         </el-menu-item>
       </el-menu>
+      <div class="footer">
+        <el-button v-if="hasPassword" size="small" @click="lock">锁定</el-button>
+      </div>
     </el-aside>
-    <el-main class="main">
-      <router-view />
-    </el-main>
+    <el-container direction="vertical">
+      <el-alert
+        type="warning"
+        :closable="false"
+        show-icon
+        title="合法性提醒"
+        description="不得在驾驶过程中拍摄, 不得进入机动车道, 举报有效期 ≤ 拍摄后 72 小时。本软件仅辅助识别, 用户对最终提交内容负责。"
+        class="legal-banner"
+      />
+      <el-main class="main">
+        <router-view />
+      </el-main>
+    </el-container>
   </el-container>
 </template>
 
@@ -81,6 +118,15 @@ function go(path: string) {
 .menu {
   border-right: none;
   flex: 1;
+}
+
+.footer {
+  padding: 12px 16px;
+  border-top: 1px solid var(--el-border-color-light);
+}
+
+.legal-banner {
+  border-radius: 0;
 }
 
 .main {
