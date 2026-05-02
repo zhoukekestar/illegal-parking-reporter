@@ -46,6 +46,8 @@ ndarray = "0.16"
 
 # 图像处理
 image = { version = "0.25", default-features = false, features = ["jpeg", "png", "webp"] }
+# 字体绘制 (P3 时间戳水印 PNG, 因 brew ffmpeg 不带 libfreetype 不能用 drawtext filter)
+ab_glyph = "0.2"
 
 # 视频处理 (P1 起): 抽帧 / 元数据 / 剪辑
 # 与系统 ffmpeg 8.1 (libavutil 60.x / libavcodec 62.x) 严格对应

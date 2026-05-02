@@ -23,6 +23,17 @@ pub struct EvidencePaths {
 /// 同名文件夹存在时直接覆盖 (用于重处理)
 pub fn build_for_event(event: &ParkingEvent, source_video: &Path) -> Result<EvidencePaths> {
     let folder = event_folder_path(event)?;
+    tracing::info!(
+        event_id = %event.id,
+        plate = %event.plate_number,
+        timestamp_ms = event.timestamp_ms,
+        source = %source_video.display(),
+        folder = %folder.display(),
+        "evidence build_for_event 开始"
+    );
+    if !source_video.exists() {
+        anyhow::bail!("源视频不存在: {}", source_video.display());
+    }
     std::fs::create_dir_all(&folder).context("创建事件证据目录失败")?;
 
     let snapshot = folder.join("截图.jpg");
@@ -60,6 +71,12 @@ pub fn build_for_event(event: &ParkingEvent, source_video: &Path) -> Result<Evid
     let info_content = render_info_txt(event, &timestamp_text);
     std::fs::write(&info, info_content.as_bytes()).context("写入信息.txt 失败")?;
 
+    tracing::info!(
+        event_id = %event.id,
+        snapshot = %snapshot.display(),
+        clip = %clip.display(),
+        "evidence build_for_event 完成"
+    );
     Ok(EvidencePaths {
         folder,
         snapshot,

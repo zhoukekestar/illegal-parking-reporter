@@ -13,7 +13,6 @@ use anyhow::{Context, Result};
 use serde::Serialize;
 use serde_json::json;
 use tracing_appender::non_blocking::WorkerGuard;
-use tracing_appender::rolling;
 use tracing_subscriber::layer::SubscriberExt;
 use tracing_subscriber::util::SubscriberInitExt;
 use tracing_subscriber::{fmt, EnvFilter};
@@ -29,13 +28,23 @@ pub fn logs_dir() -> Result<PathBuf> {
     Ok(p)
 }
 
-/// 初始化 tracing: stdout + 滚动文件
+/// 初始化 tracing: stdout + 启动时新建带时间戳的日志文件
+///
+/// 每次进程启动新建独立日志文件 parking_YYYYMMDD_HHMMSS.log,
+/// 老文件保留 (用户可手动清, 也可通过 prune_old_logs 自动清).
 ///
 /// 返回的 WorkerGuard 必须在程序退出前保持存活, 否则文件 sink 不刷新
-pub fn init_logging_with_file() -> Result<WorkerGuard> {
+pub fn init_logging_with_file() -> Result<(WorkerGuard, std::path::PathBuf)> {
     let dir = logs_dir()?;
-    let appender = rolling::daily(&dir, "parking.log");
-    let (file_writer, guard) = tracing_appender::non_blocking(appender);
+    let stamp = chrono::Local::now().format("%Y%m%d_%H%M%S");
+    let path = dir.join(format!("parking_{stamp}.log"));
+    let file = std::fs::OpenOptions::new()
+        .create(true)
+        .write(true)
+        .truncate(true)
+        .open(&path)
+        .with_context(|| format!("创建日志文件失败: {}", path.display()))?;
+    let (file_writer, guard) = tracing_appender::non_blocking(file);
 
     let filter = EnvFilter::try_from_default_env().unwrap_or_else(|_| {
         EnvFilter::new("info,illegal_parking_reporter_lib=debug,ort=info")
@@ -56,8 +65,38 @@ pub fn init_logging_with_file() -> Result<WorkerGuard> {
         .try_init()
         .ok();
 
-    tracing::info!(?dir, "日志文件 sink 已就绪");
-    Ok(guard)
+    tracing::info!(?path, "==== 新会话日志开始 ====");
+    Ok((guard, path))
+}
+
+/// 清理老日志: 按修改时间倒序保留最近 N 个, 删除其余
+pub fn prune_old_logs(keep: usize) {
+    let Ok(dir) = logs_dir() else { return };
+    let mut entries: Vec<(std::path::PathBuf, std::time::SystemTime)> = std::fs::read_dir(&dir)
+        .into_iter()
+        .flatten()
+        .flatten()
+        .filter_map(|e| {
+            let p = e.path();
+            if p.extension().and_then(|s| s.to_str()) != Some("log") {
+                return None;
+            }
+            let m = std::fs::metadata(&p).ok()?;
+            Some((p, m.modified().ok()?))
+        })
+        .collect();
+    if entries.len() <= keep {
+        return;
+    }
+    // 按时间倒序, 留前 N 个
+    entries.sort_by(|a, b| b.1.cmp(&a.1));
+    for (p, _) in entries.iter().skip(keep) {
+        if let Err(e) = std::fs::remove_file(p) {
+            tracing::warn!(error = %e, ?p, "删除旧日志文件失败");
+        } else {
+            tracing::debug!(?p, "删除旧日志文件");
+        }
+    }
 }
 
 #[derive(Debug, Serialize)]

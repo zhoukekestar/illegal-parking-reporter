@@ -458,8 +458,20 @@ async fn process_one_job(
                     evt.snapshot_path = Some(paths.snapshot.to_string_lossy().to_string());
                     evt.clip_path = Some(paths.clip.to_string_lossy().to_string());
                 }
-                Ok(Err(e)) => tracing::warn!(error = %e, event = %evt.id, "证据包构建失败"),
-                Err(e) => tracing::warn!(error = %e, event = %evt.id, "证据包构建 task panic"),
+                Ok(Err(e)) => tracing::error!(
+                    error = %e,
+                    error_chain = ?e,
+                    event_id = %evt.id,
+                    plate = %evt.plate_number,
+                    timestamp_ms = evt.timestamp_ms,
+                    source = %evt.source_video,
+                    "证据包构建失败 (snapshot/clip path 留空)"
+                ),
+                Err(e) => tracing::error!(
+                    error = %e,
+                    event_id = %evt.id,
+                    "证据包构建 task panic"
+                ),
             }
         }
 

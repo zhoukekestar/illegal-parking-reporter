@@ -5,6 +5,7 @@
 pub mod clip;
 pub mod extract;
 pub mod metadata;
+pub mod watermark;
 
 /// 全局初始化 ffmpeg 库 (注册 codec/format)
 ///

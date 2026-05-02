@@ -14,15 +14,25 @@ pub mod video;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
-    // P7: 日志同时写文件 (guard 必须保持存活直到进程退出)
+    // 日志: 每次启动新建带时间戳的日志文件 (guard 保持到进程退出)
     let _log_guard = match diagnostic::init_logging_with_file() {
-        Ok(g) => Some(g),
+        Ok((g, path)) => {
+            eprintln!("[路况记录助手] 本次会话日志: {}", path.display());
+            Some(g)
+        }
         Err(e) => {
             eprintln!("初始化日志文件 sink 失败: {e:#}, 退化到 stderr");
             None
         }
     };
-    tracing::info!(version = env!("CARGO_PKG_VERSION"), "路况记录助手启动");
+    diagnostic::prune_old_logs(50);
+    tracing::info!(
+        version = env!("CARGO_PKG_VERSION"),
+        os = std::env::consts::OS,
+        arch = std::env::consts::ARCH,
+        cwd = ?std::env::current_dir().ok(),
+        "路况记录助手启动"
+    );
 
     if let Err(e) = video::init() {
         tracing::error!(error = %e, "ffmpeg 初始化失败");
