@@ -1,12 +1,12 @@
 // 路况记录助手 - Rust 后端入口
 //
-// 当前阶段: P1 (单视频识别 pipeline)
+// 当前阶段: P2 (批量并发流水线)
 // 已挂载模块:
 //   - ai::vehicle / ai::plate / ai::model_path
 //   - video::metadata / video::extract
-//   - pipeline::orchestrator / pipeline::aggregate
-//   - db (SQLite 持久化, P6 升级 SQLCipher)
-//   - commands::{system, detection, video}
+//   - pipeline::orchestrator (P1 单视频) / pipeline::parallel (P2 批处理)
+//   - db (events + video_jobs)
+//   - commands::{system, detection, video, pipeline}
 
 pub mod ai;
 pub mod commands;
@@ -37,6 +37,13 @@ pub fn run() {
     }
     if let Err(e) = db::init() {
         tracing::error!(error = %e, "数据库初始化失败, 持久化功能将不可用");
+    } else {
+        // 启动恢复: 把残留的 running 任务重置为 pending, 等待用户在 UI 点续跑
+        if let Ok(lock) = db::conn() {
+            if let Ok(conn) = lock.lock() {
+                let _ = db::jobs::reset_running_to_pending(&conn);
+            }
+        }
     }
 
     if std::env::var("ORT_DYLIB_PATH").is_err() {
@@ -57,6 +64,10 @@ pub fn run() {
             commands::video::process_video,
             commands::video::list_events,
             commands::video::detect_plate_demo,
+            commands::pipeline::start_batch_pipeline,
+            commands::pipeline::resume_pending_jobs,
+            commands::pipeline::list_jobs,
+            commands::pipeline::list_pending_jobs,
         ])
         .run(tauri::generate_context!())
         .expect("启动 Tauri 应用失败");

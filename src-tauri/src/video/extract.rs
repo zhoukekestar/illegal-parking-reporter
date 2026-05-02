@@ -4,6 +4,10 @@
 //   - 解码全部帧, 但只在 pts >= next_target 时保留, 实现 1fps 等效抽样
 //   - 旋转必须在 RGB 转换 *之后* 应用 (image crate 旋转算子作用于像素 buffer)
 //   - sws_scale 把任意输入像素格式 -> RGB24, 再封装为 image::RgbImage
+//
+// 两种调用形态:
+//   - extract_frames_with_callback: 流式, 每抽到一帧就回调, 用于 P2 并发流水线
+//   - extract_frames: 兼容封装, 把回调结果收集成 Vec, 用于单测/单视频快查
 
 use std::path::Path;
 
@@ -44,11 +48,18 @@ impl Default for ExtractOptions {
     }
 }
 
-/// 从视频抽帧, 返回所有抽样到的帧 (内存中)
+/// 流式抽帧: 每抽到一帧就回调, 由调用方决定如何消费
 ///
-/// **注意**: 默认会把全部抽样帧持有在内存中, 适合短视频或受 max_frames 限制的场景。
-/// P2 的批处理流水线会改用流式 callback 接口避免内存峰值。
-pub fn extract_frames(path: &Path, opts: &ExtractOptions) -> Result<Vec<ExtractedFrame>> {
+/// callback 返回 Err 会中止抽帧 (用于实现"取消")
+/// 返回值是已经抽出并交给 callback 的帧总数
+pub fn extract_frames_with_callback<F>(
+    path: &Path,
+    opts: &ExtractOptions,
+    mut on_frame: F,
+) -> Result<usize>
+where
+    F: FnMut(ExtractedFrame) -> Result<()>,
+{
     let mut ictx = ffmpeg::format::input(&path)
         .with_context(|| format!("无法打开视频: {}", path.display()))?;
 
@@ -77,13 +88,14 @@ pub fn extract_frames(path: &Path, opts: &ExtractOptions) -> Result<Vec<Extracte
 
     let interval_secs = 1.0 / opts.target_fps as f64;
     let mut next_target_secs: f64 = 0.0;
-    let mut extracted: Vec<ExtractedFrame> = Vec::new();
+    let mut next_index: usize = 0;
     let mut decoded = VideoFrame::empty();
 
     let try_keep = |decoded: &VideoFrame,
                         scaler: &mut SwsContext,
                         next_target_secs: &mut f64,
-                        extracted: &mut Vec<ExtractedFrame>|
+                        next_index: &mut usize,
+                        on_frame: &mut F|
      -> Result<bool> {
         let pts = match decoded.pts() {
             Some(p) => p,
@@ -100,16 +112,18 @@ pub fn extract_frames(path: &Path, opts: &ExtractOptions) -> Result<Vec<Extracte
         let img = rgb_frame_to_image(&rgb).context("RGB 帧转 RgbImage 失败")?;
         let img = apply_rotation(img, rotation_cw);
 
-        let frame_index = extracted.len();
-        extracted.push(ExtractedFrame {
+        let frame_index = *next_index;
+        *next_index += 1;
+        *next_target_secs += interval_secs;
+
+        on_frame(ExtractedFrame {
             frame_index,
             timestamp_ms: (t_secs * 1000.0) as i64,
             image: img,
-        });
-        *next_target_secs += interval_secs;
+        })?;
 
         if let Some(max) = opts.max_frames {
-            if extracted.len() >= max {
+            if *next_index >= max {
                 return Ok(true);
             }
         }
@@ -124,7 +138,13 @@ pub fn extract_frames(path: &Path, opts: &ExtractOptions) -> Result<Vec<Extracte
         loop {
             match decoder.receive_frame(&mut decoded) {
                 Ok(()) => {
-                    if try_keep(&decoded, &mut scaler, &mut next_target_secs, &mut extracted)? {
+                    if try_keep(
+                        &decoded,
+                        &mut scaler,
+                        &mut next_target_secs,
+                        &mut next_index,
+                        &mut on_frame,
+                    )? {
                         break 'demux;
                     }
                 }
@@ -140,7 +160,13 @@ pub fn extract_frames(path: &Path, opts: &ExtractOptions) -> Result<Vec<Extracte
     loop {
         match decoder.receive_frame(&mut decoded) {
             Ok(()) => {
-                if try_keep(&decoded, &mut scaler, &mut next_target_secs, &mut extracted)? {
+                if try_keep(
+                    &decoded,
+                    &mut scaler,
+                    &mut next_target_secs,
+                    &mut next_index,
+                    &mut on_frame,
+                )? {
                     break;
                 }
             }
@@ -150,12 +176,22 @@ pub fn extract_frames(path: &Path, opts: &ExtractOptions) -> Result<Vec<Extracte
 
     tracing::info!(
         path = %path.display(),
-        extracted = extracted.len(),
+        extracted = next_index,
         rotation_cw,
         "抽帧完成"
     );
 
-    Ok(extracted)
+    Ok(next_index)
+}
+
+/// 一次性抽帧到内存 (兼容 P1 的同步 orchestrator)
+pub fn extract_frames(path: &Path, opts: &ExtractOptions) -> Result<Vec<ExtractedFrame>> {
+    let mut out = Vec::new();
+    extract_frames_with_callback(path, opts, |f| {
+        out.push(f);
+        Ok(())
+    })?;
+    Ok(out)
 }
 
 fn rgb_frame_to_image(frame: &VideoFrame) -> Result<RgbImage> {

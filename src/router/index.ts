@@ -22,7 +22,13 @@ const routes: RouteRecordRaw[] = [
     path: "/process",
     name: "process",
     component: () => import("@/views/ProcessView.vue"),
-    meta: { title: "视频处理", icon: "VideoPlay" },
+    meta: { title: "单视频调试", icon: "VideoPlay" },
+  },
+  {
+    path: "/processing",
+    name: "processing",
+    component: () => import("@/views/ProcessingView.vue"),
+    meta: { title: "批量处理", icon: "Loading" },
   },
   {
     path: "/events",

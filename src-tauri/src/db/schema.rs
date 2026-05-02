@@ -1,15 +1,12 @@
-// 表结构 (P1 简化版)
+// 表结构 (递增式迁移)
 //
-// 设计原则:
-//   - bbox / event_time 用 TEXT 存 JSON 字符串, 简化 schema 演进
-//   - plate_number 允许 NULL (车牌识别失败 = "<待确认>" 也按 TEXT 存)
-//   - review_status 用 TEXT 枚举: pending/accepted/rejected/deferred
-//   - 预留 user_id 列(P6 多用户准备); P1 全部填 "default"
+// V1 (P1): events 表
+// V2 (P2): video_jobs 表 (批处理状态跟踪 + 断点续传)
 
 use anyhow::Result;
 use rusqlite::Connection;
 
-const SCHEMA_VERSION: i32 = 1;
+const SCHEMA_VERSION: i32 = 2;
 
 pub fn run_migrations(conn: &Connection) -> Result<()> {
     conn.execute(
@@ -32,11 +29,18 @@ pub fn run_migrations(conn: &Connection) -> Result<()> {
 
     if current < 1 {
         conn.execute_batch(SCHEMA_V1)?;
+        tracing::info!("schema 升级到 v1");
+    }
+    if current < 2 {
+        conn.execute_batch(SCHEMA_V2)?;
+        tracing::info!("schema 升级到 v2 (video_jobs)");
+    }
+
+    if current < SCHEMA_VERSION {
         conn.execute(
             "INSERT OR REPLACE INTO schema_meta (key, value) VALUES ('version', ?1)",
             rusqlite::params![SCHEMA_VERSION.to_string()],
         )?;
-        tracing::info!(version = SCHEMA_VERSION, "schema 迁移完成");
     }
 
     Ok(())
@@ -49,12 +53,12 @@ CREATE TABLE IF NOT EXISTS events (
     source_video TEXT NOT NULL,
     representative_frame_index INTEGER NOT NULL,
     timestamp_ms INTEGER NOT NULL,
-    event_time TEXT,                          -- ISO 8601, 可空
+    event_time TEXT,
     plate_number TEXT NOT NULL,
     plate_confidence REAL NOT NULL,
     plate_manual_corrected TEXT,
     vehicle_class TEXT NOT NULL,
-    vehicle_bbox_json TEXT NOT NULL,          -- "[x1,y1,x2,y2]"
+    vehicle_bbox_json TEXT NOT NULL,
     first_seen_ms INTEGER NOT NULL,
     last_seen_ms INTEGER NOT NULL,
     frame_hits INTEGER NOT NULL,
@@ -68,4 +72,23 @@ CREATE TABLE IF NOT EXISTS events (
 CREATE INDEX IF NOT EXISTS idx_events_source_video ON events(source_video);
 CREATE INDEX IF NOT EXISTS idx_events_review_status ON events(review_status);
 CREATE INDEX IF NOT EXISTS idx_events_plate ON events(plate_number);
+"#;
+
+const SCHEMA_V2: &str = r#"
+CREATE TABLE IF NOT EXISTS video_jobs (
+    id TEXT PRIMARY KEY,
+    batch_id TEXT NOT NULL,
+    source_video TEXT NOT NULL,
+    status TEXT NOT NULL DEFAULT 'pending',
+    processed_frames INTEGER NOT NULL DEFAULT 0,
+    estimated_frames INTEGER NOT NULL DEFAULT 0,
+    last_error TEXT,
+    created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
+    finished_at TEXT,
+    events_count INTEGER NOT NULL DEFAULT 0
+);
+
+CREATE INDEX IF NOT EXISTS idx_jobs_batch ON video_jobs(batch_id);
+CREATE INDEX IF NOT EXISTS idx_jobs_status ON video_jobs(status);
+CREATE INDEX IF NOT EXISTS idx_jobs_video ON video_jobs(source_video);
 "#;

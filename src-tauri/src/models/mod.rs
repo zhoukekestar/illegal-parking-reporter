@@ -5,4 +5,5 @@
 
 pub mod detection;
 pub mod event;
+pub mod job;
 pub mod observation;

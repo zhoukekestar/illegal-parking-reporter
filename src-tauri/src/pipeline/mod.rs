@@ -9,3 +9,4 @@
 
 pub mod aggregate;
 pub mod orchestrator;
+pub mod parallel;

@@ -4,6 +4,7 @@
 // 高并发场景将来切到 r2d2/deadpool 连接池
 
 pub mod events;
+pub mod jobs;
 pub mod schema;
 
 use std::path::PathBuf;
