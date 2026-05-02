@@ -106,6 +106,44 @@ pub async fn update_event_plate(
     .map_err(|e| format!("更新车牌失败: {e:#}"))
 }
 
+#[derive(Debug, serde::Serialize)]
+pub struct CleanupSummary {
+    pub deleted_count: usize,
+    pub deleted_evidence_dirs: usize,
+}
+
+/// 删除不符合中国车牌格式的历史事件 (用户反馈: <待确认> 与 OCR 乱码事件淹没列表)
+///
+/// 同时尝试删除每个事件对应的 evidence 子目录 (失败仅记录日志, 不影响 DB 删除)
+#[tauri::command]
+pub async fn cleanup_invalid_events() -> Result<CleanupSummary, String> {
+    tokio::task::spawn_blocking(|| -> anyhow::Result<CleanupSummary> {
+        let lock = crate::db::conn()?;
+        let conn = lock.lock().map_err(|e| anyhow::anyhow!("DB mutex 中毒: {e}"))?;
+        let (ids, dirs) = crate::db::events::delete_events_with_invalid_plates(&conn)?;
+        let deleted_count = ids.len();
+        let mut dir_removed = 0usize;
+        for d in &dirs {
+            match std::fs::remove_dir_all(d) {
+                Ok(_) => dir_removed += 1,
+                Err(e) => tracing::warn!(error = %e, path = %d, "删除 evidence 子目录失败"),
+            }
+        }
+        tracing::info!(
+            deleted_count,
+            evidence_dirs_removed = dir_removed,
+            "清理无效事件完成"
+        );
+        Ok(CleanupSummary {
+            deleted_count,
+            deleted_evidence_dirs: dir_removed,
+        })
+    })
+    .await
+    .map_err(|e| format!("blocking task panic: {e}"))?
+    .map_err(|e| format!("清理失败: {e:#}"))
+}
+
 /// P8.1: 标记事件为"已上传"
 #[tauri::command]
 pub async fn mark_event_uploaded(event_id: String) -> Result<(), String> {

@@ -43,6 +43,15 @@ export async function markEventUploaded(eventId: string): Promise<void> {
   await invoke("mark_event_uploaded", { eventId });
 }
 
+export interface CleanupSummary {
+  deleted_count: number;
+  deleted_evidence_dirs: number;
+}
+
+export async function cleanupInvalidEvents(): Promise<CleanupSummary> {
+  return invoke<CleanupSummary>("cleanup_invalid_events");
+}
+
 /** 单个违停事件 (聚合后) */
 export interface ParkingEvent {
   id: string;

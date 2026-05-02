@@ -50,11 +50,14 @@ pub fn process_video(path: &Path, plate_recognize: bool) -> Result<ProcessOutcom
         .context("车辆/车牌检测失败")?;
 
     let event_time_base = parse_creation_time(metadata.creation_time.as_deref());
+    // 读 settings 里的 plate_conf_threshold (DB 没就 fallback 0.6)
+    let min_plate_conf = read_min_plate_conf().unwrap_or(0.6);
     let events = aggregate::aggregate_events(
         path,
         &observations,
         event_time_base,
         60_000, /* 60s window */
+        min_plate_conf,
     );
 
     Ok(ProcessOutcome {
@@ -154,6 +157,13 @@ fn run_plate_recognition(frame: &RgbImage, vehicles: &mut [VehicleObservation]) 
     if let Err(e) = crate::ai::plate::recognize_into(frame, vehicles) {
         tracing::warn!(error = %e, "车牌识别整体失败, 跳过本帧");
     }
+}
+
+/// 从 settings 表读 plate_conf_threshold (DB 未就绪/未初始化则 None)
+fn read_min_plate_conf() -> Option<f32> {
+    let lock = crate::db::conn().ok()?;
+    let conn = lock.lock().ok()?;
+    crate::db::settings::load(&conn).ok().map(|s| s.plate_conf_threshold)
 }
 
 /// 解析 ISO8601 / RFC3339 创建时间, 失败返回 None

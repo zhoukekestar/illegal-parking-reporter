@@ -334,6 +334,61 @@ fn pipeline() -> Result<&'static Mutex<PlatePipeline>> {
     Ok(PIPELINE.get().expect("PIPELINE 已初始化"))
 }
 
+// ========== 中国车牌格式校验 ==========
+
+/// 中国大陆车牌首位合法汉字 (省/直辖市/自治区简称, 31 个)
+const VALID_PROVINCES: &[char] = &[
+    '京', '津', '沪', '渝', // 直辖市
+    '冀', '晋', '辽', '吉', '黑', '苏', '浙', '皖', '闽', '赣', '鲁',
+    '豫', '鄂', '湘', '粤', '桂', '琼', '川', '贵', '云', '陕', '甘', '青',
+    '蒙', '宁', '新', '藏', // 5 自治区
+];
+
+/// 末位特殊字符 (警车 / 教练车 / 港澳进入内地 / 大使馆领馆)
+const VALID_SUFFIXES: &[char] = &['警', '学', '港', '澳', '领', '使'];
+
+/// 校验车牌是否符合中国大陆格式
+///
+/// 规范 (DEVELOPMENT_PLAN.md §三):
+///   - 长度 7 或 8
+///   - 首位: 省份汉字 (31 个之一)
+///   - 第二位: A-Z 字母 (排除 I/O, 中国车牌不用)
+///   - 后续位: 字母数字 (同样排除 I/O), 末位可选 警/学/港/澳/领/使
+///
+/// 不严格区分蓝牌/绿牌/警车细节, 只做结构校验. 用于过滤 OCR 乱码识别.
+pub fn is_valid_chinese_plate(s: &str) -> bool {
+    let chars: Vec<char> = s.chars().collect();
+    let n = chars.len();
+    if n < 7 || n > 8 {
+        return false;
+    }
+    // 首位省份
+    if !VALID_PROVINCES.contains(&chars[0]) {
+        return false;
+    }
+    // 第二位 A-Z (不含 I/O)
+    let c1 = chars[1];
+    if !(c1.is_ascii_uppercase() && c1 != 'I' && c1 != 'O') {
+        return false;
+    }
+    // 末位单独看: 如果是特殊后缀, body 长度 -1
+    let last = *chars.last().unwrap();
+    let body_end = if VALID_SUFFIXES.contains(&last) { n - 1 } else { n };
+    if body_end < 6 {
+        // 至少 4 位车牌主体 + 第二位字母 + 首位省份 = 6 位 (7 位车牌, 末位特殊后缀的不算)
+        return false;
+    }
+    // body 中间位 (第 2-?): 字母数字, 不含 I/O
+    for i in 2..body_end {
+        let c = chars[i];
+        let ok = (c.is_ascii_uppercase() || c.is_ascii_digit()) && c != 'I' && c != 'O';
+        if !ok {
+            return false;
+        }
+    }
+    true
+}
+
 // ========== 公共 API ==========
 
 /// 单图检测 + 识别 (供 demo 命令使用)
@@ -436,6 +491,53 @@ mod tests {
         assert_eq!(TOKENS[20], "J");
         // 浙
         assert!(TOKENS.iter().any(|&t| t == "浙"));
+    }
+
+    #[test]
+    fn valid_chinese_plate_accepts_common_forms() {
+        // 普通蓝牌 7 位
+        assert!(is_valid_chinese_plate("浙A12345"));
+        assert!(is_valid_chinese_plate("京A88888"));
+        assert!(is_valid_chinese_plate("粤B7H3K9"));
+        // 新能源 8 位
+        assert!(is_valid_chinese_plate("浙AD12345"));
+        assert!(is_valid_chinese_plate("沪BD00001"));
+        // 警车 7 位 (末位 警)
+        assert!(is_valid_chinese_plate("浙A1234警"));
+        // 教练 7 位
+        assert!(is_valid_chinese_plate("京A1234学"));
+        // 港澳粤 Z
+        assert!(is_valid_chinese_plate("粤Z1234港"));
+        assert!(is_valid_chinese_plate("粤Z1234澳"));
+    }
+
+    #[test]
+    fn valid_chinese_plate_rejects_garbage() {
+        // <待确认> 占位符
+        assert!(!is_valid_chinese_plate("<待确认>"));
+        // 空 / 太短
+        assert!(!is_valid_chinese_plate(""));
+        assert!(!is_valid_chinese_plate("浙A"));
+        assert!(!is_valid_chinese_plate("浙A123"));
+        // 太长 (> 8)
+        assert!(!is_valid_chinese_plate("浙A1234567"));
+        // 首位不是省份
+        assert!(!is_valid_chinese_plate("AAA1234"));
+        assert!(!is_valid_chinese_plate("挂A12345"));
+        assert!(!is_valid_chinese_plate("学A12345"));
+        // 第二位不是字母
+        assert!(!is_valid_chinese_plate("浙112345"));
+        // 第二位 I/O
+        assert!(!is_valid_chinese_plate("浙I12345"));
+        assert!(!is_valid_chinese_plate("浙O12345"));
+        // 含小写字母
+        assert!(!is_valid_chinese_plate("浙a12345"));
+        // 含特殊符号
+        assert!(!is_valid_chinese_plate("浙A1-345"));
+        assert!(!is_valid_chinese_plate("浙A1.345"));
+        // 中间位含 I/O
+        assert!(!is_valid_chinese_plate("浙A1I345"));
+        assert!(!is_valid_chinese_plate("浙AO2345"));
     }
 
     #[test]

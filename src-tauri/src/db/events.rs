@@ -167,6 +167,40 @@ fn row_to_event(r: &Row<'_>) -> rusqlite::Result<ParkingEvent> {
     })
 }
 
+/// 删除不合法车牌的事件 (DEVELOPMENT_PLAN.md 用户反馈)
+///
+/// 判断: plate_manual_corrected 优先, 其次 plate_number;
+/// 用 ai::plate::is_valid_chinese_plate 校验
+///
+/// 返回 (deleted_event_ids, deleted_evidence_paths)
+pub fn delete_events_with_invalid_plates(
+    conn: &Connection,
+) -> Result<(Vec<String>, Vec<String>)> {
+    let events = list_all(conn)?;
+    let mut to_delete: Vec<String> = Vec::new();
+    let mut evidence_paths: Vec<String> = Vec::new();
+
+    for e in &events {
+        let plate = e
+            .plate_manual_corrected
+            .as_deref()
+            .unwrap_or(e.plate_number.as_str());
+        if !crate::ai::plate::is_valid_chinese_plate(plate) {
+            to_delete.push(e.id.clone());
+            // 收集对应 evidence 子目录 (调用方决定是否物理删除)
+            if let Some(snap) = &e.snapshot_path {
+                if let Some(parent) = std::path::Path::new(snap).parent() {
+                    evidence_paths.push(parent.to_string_lossy().to_string());
+                }
+            }
+        }
+    }
+    for id in &to_delete {
+        conn.execute("DELETE FROM events WHERE id = ?1", params![id])?;
+    }
+    Ok((to_delete, evidence_paths))
+}
+
 /// P8.1: 标记事件已通过剪贴板助手上传
 pub fn mark_uploaded(conn: &Connection, event_id: &str) -> Result<()> {
     let now = chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Secs, true);

@@ -1,11 +1,14 @@
-// 事件聚合 (P1 简化版)
+// 事件聚合 (P1 简化版, 用户反馈后强化过滤)
 //
-// 规则 (DEVELOPMENT_PLAN.md §五 P1):
-//   - 同视频内, 同车牌, 60 秒内的多个观测合并为一个事件
+// 规则:
+//   - 必须有 plate (HyperLPR3 识别成功)
+//   - plate.text 必须符合中国车牌格式 (is_valid_chinese_plate)
+//   - plate.confidence >= min_plate_confidence (默认 0.6, settings 可调)
+//   - 同视频内, 同车牌, window_ms 内多帧合并为一个事件
 //   - 取车牌识别置信度最高的那一帧作为代表
-//   - 记录 first_seen 到 last_seen 的时间窗
-//   - 车牌识别失败的帧 (plate=None) 也保留为 "未知车牌" 事件, 用稳定的 bbox 中心做 key
-//     (P4 审核 UI 会强制用户手动输入车牌才能采纳, 见 §五 P4)
+//
+// 不合法的 plate (空/<待确认>/格式乱码) 直接丢弃, 不再生成 <待确认> 占位事件
+// (用户反馈: 太多无效事件淹没列表)
 
 use std::collections::HashMap;
 use std::path::Path;
@@ -15,22 +18,42 @@ use chrono::{DateTime, Duration, Utc};
 use crate::models::event::{ParkingEvent, ReviewStatus};
 use crate::models::observation::{FrameObservation, VehicleObservation};
 
-const UNKNOWN_PLATE: &str = "<待确认>";
-
 /// 聚合单个视频的所有帧观测, 输出 Vec<ParkingEvent>
 ///
 /// `event_time_base` 是视频拍摄时间 (creation_time), 可选; None 时事件不带 event_time
+/// `min_plate_confidence`: 低于此值的车牌识别丢弃
 pub fn aggregate_events(
     source_video: &Path,
     observations: &[FrameObservation],
     event_time_base: Option<DateTime<Utc>>,
     window_ms: i64,
+    min_plate_confidence: f32,
 ) -> Vec<ParkingEvent> {
     let mut buckets: HashMap<String, Vec<FrameSample>> = HashMap::new();
+    let mut total_skipped_no_plate = 0usize;
+    let mut total_skipped_invalid = 0usize;
+    let mut total_skipped_low_conf = 0usize;
+    let mut total_kept = 0usize;
 
     for frame in observations {
         for v in &frame.vehicles {
-            let key = bucket_key(v);
+            let plate = match &v.plate {
+                Some(p) => p,
+                None => {
+                    total_skipped_no_plate += 1;
+                    continue;
+                }
+            };
+            if !crate::ai::plate::is_valid_chinese_plate(&plate.text) {
+                total_skipped_invalid += 1;
+                continue;
+            }
+            if plate.confidence < min_plate_confidence {
+                total_skipped_low_conf += 1;
+                continue;
+            }
+            total_kept += 1;
+            let key = format!("plate::{}", plate.text);
             buckets.entry(key).or_default().push(FrameSample {
                 frame_index: frame.frame_index,
                 timestamp_ms: frame.timestamp_ms,
@@ -38,6 +61,14 @@ pub fn aggregate_events(
             });
         }
     }
+    tracing::info!(
+        kept = total_kept,
+        skipped_no_plate = total_skipped_no_plate,
+        skipped_invalid = total_skipped_invalid,
+        skipped_low_conf = total_skipped_low_conf,
+        min_plate_confidence,
+        "聚合阶段过滤统计"
+    );
 
     let source_str = source_video.to_string_lossy().to_string();
     let mut events = Vec::new();
@@ -79,24 +110,7 @@ struct FrameSample {
     vehicle: VehicleObservation,
 }
 
-/// 同车辆判定 key:
-///   - 有车牌: 用 plate.text
-///   - 无车牌: 用 bbox 中心粗粒度量化, 静止违停车辆每帧 bbox 接近, 量化后会落入同一桶
-fn bucket_key(v: &VehicleObservation) -> String {
-    if let Some(p) = &v.plate {
-        if !p.text.is_empty() {
-            return format!("plate::{}", p.text);
-        }
-    }
-    // 无车牌走 bbox 中心 50px 量化 (针对静止车辆有效, 移动车辆 P2 提前判定模块解决)
-    let cx = (v.bbox[0] + v.bbox[2]) / 2.0;
-    let cy = (v.bbox[1] + v.bbox[3]) / 2.0;
-    format!("nocls::{}::{}::{}",
-        v.class_id,
-        (cx / 50.0).round() as i32,
-        (cy / 50.0).round() as i32
-    )
-}
+// (旧 bucket_key 已并入 aggregate_events 过滤逻辑, 不再使用)
 
 /// 把同一 bucket 的样本组装成单个 ParkingEvent
 fn build_event(
@@ -119,10 +133,13 @@ fn build_event(
     let first_seen_ms = samples.first().map(|s| s.timestamp_ms).unwrap_or(0);
     let last_seen_ms = samples.last().map(|s| s.timestamp_ms).unwrap_or(0);
 
-    let (plate_number, plate_confidence) = match &representative.vehicle.plate {
-        Some(p) => (p.text.clone(), p.confidence),
-        None => (UNKNOWN_PLATE.to_string(), 0.0),
-    };
+    // 此时一定有 plate (aggregate_events 已过滤), 否则不会进 bucket
+    let plate = representative
+        .vehicle
+        .plate
+        .as_ref()
+        .expect("representative 必有合法 plate");
+    let (plate_number, plate_confidence) = (plate.text.clone(), plate.confidence);
 
     let event_time = event_time_base.map(|base| {
         (base + Duration::milliseconds(representative.timestamp_ms))
@@ -180,6 +197,8 @@ mod tests {
         }
     }
 
+    const MIN_CONF: f32 = 0.6;
+
     #[test]
     fn merge_same_plate_within_window() {
         let obs = vec![
@@ -187,10 +206,9 @@ mod tests {
             make_obs(1, 1000, Some("浙A12345"), 0.95),
             make_obs(2, 2000, Some("浙A12345"), 0.6),
         ];
-        let evs = aggregate_events(&PathBuf::from("v.mp4"), &obs, None, 60_000);
+        let evs = aggregate_events(&PathBuf::from("v.mp4"), &obs, None, 60_000, MIN_CONF);
         assert_eq!(evs.len(), 1);
         assert_eq!(evs[0].plate_number, "浙A12345");
-        // representative 是 0.95 那帧
         assert_eq!(evs[0].representative_frame_index, 1);
         assert_eq!(evs[0].first_seen_ms, 0);
         assert_eq!(evs[0].last_seen_ms, 2000);
@@ -201,9 +219,9 @@ mod tests {
     fn split_when_outside_window() {
         let obs = vec![
             make_obs(0, 0, Some("浙A12345"), 0.9),
-            make_obs(1, 70_000, Some("浙A12345"), 0.9), // 70s > 60s
+            make_obs(1, 70_000, Some("浙A12345"), 0.9),
         ];
-        let evs = aggregate_events(&PathBuf::from("v.mp4"), &obs, None, 60_000);
+        let evs = aggregate_events(&PathBuf::from("v.mp4"), &obs, None, 60_000, MIN_CONF);
         assert_eq!(evs.len(), 2);
     }
 
@@ -213,19 +231,42 @@ mod tests {
             make_obs(0, 0, Some("浙A12345"), 0.9),
             make_obs(1, 1000, Some("浙B88888"), 0.9),
         ];
-        let evs = aggregate_events(&PathBuf::from("v.mp4"), &obs, None, 60_000);
+        let evs = aggregate_events(&PathBuf::from("v.mp4"), &obs, None, 60_000, MIN_CONF);
         assert_eq!(evs.len(), 2);
     }
 
     #[test]
-    fn no_plate_buckets_by_bbox_center() {
-        // 同一辆静止车多帧 bbox 几乎一致 -> 应聚合为一个事件
+    fn no_plate_observations_produce_no_events() {
+        // P1 强化后: 无 plate 直接丢弃, 不再生成 <待确认>
         let obs = vec![
             make_obs(0, 0, None, 0.0),
             make_obs(1, 1000, None, 0.0),
         ];
-        let evs = aggregate_events(&PathBuf::from("v.mp4"), &obs, None, 60_000);
+        let evs = aggregate_events(&PathBuf::from("v.mp4"), &obs, None, 60_000, MIN_CONF);
+        assert!(evs.is_empty());
+    }
+
+    #[test]
+    fn invalid_plate_format_filtered_out() {
+        // OCR 乱码 / 不符合中国格式 -> 丢弃
+        let obs = vec![
+            make_obs(0, 0, Some("ABC1234"), 0.95), // 首位不是省份
+            make_obs(1, 1000, Some("浙IO234"), 0.95), // 含 I/O
+            make_obs(2, 2000, Some("浙A12345"), 0.95), // 合法, 应保留
+        ];
+        let evs = aggregate_events(&PathBuf::from("v.mp4"), &obs, None, 60_000, MIN_CONF);
         assert_eq!(evs.len(), 1);
-        assert_eq!(evs[0].plate_number, "<待确认>");
+        assert_eq!(evs[0].plate_number, "浙A12345");
+    }
+
+    #[test]
+    fn low_confidence_plate_filtered_out() {
+        let obs = vec![
+            make_obs(0, 0, Some("浙A12345"), 0.4), // < 0.6 丢弃
+            make_obs(1, 1000, Some("浙A12345"), 0.95), // 保留
+        ];
+        let evs = aggregate_events(&PathBuf::from("v.mp4"), &obs, None, 60_000, MIN_CONF);
+        assert_eq!(evs.len(), 1);
+        assert_eq!(evs[0].frame_hits, 1);
     }
 }

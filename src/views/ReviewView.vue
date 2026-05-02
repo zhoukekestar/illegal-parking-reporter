@@ -1,12 +1,13 @@
 <script setup lang="ts">
 import { ref, computed, onMounted, watch, nextTick } from "vue";
 import { convertFileSrc } from "@tauri-apps/api/core";
-import { ElMessage } from "element-plus";
+import { ElMessage, ElMessageBox } from "element-plus";
 
 import {
   listEvents,
   updateEventStatus,
   updateEventPlate,
+  cleanupInvalidEvents,
   type ParkingEvent,
 } from "@/api/video";
 import { openInFileManager } from "@/api/system";
@@ -53,6 +54,35 @@ async function refresh() {
     errMsg.value = String(e);
   } finally {
     loading.value = false;
+  }
+}
+
+async function cleanupInvalid() {
+  await ElMessageBox.confirm(
+    "将删除所有车牌不符合中国格式的事件 (含 <待确认>, OCR 乱码),\n同时删除对应的证据文件夹. 此操作不可撤销.",
+    "清理无效事件",
+    { type: "warning", confirmButtonText: "确认清理", cancelButtonText: "取消" }
+  );
+  try {
+    const r = await cleanupInvalidEvents();
+    ElMessage.success(
+      `已删除 ${r.deleted_count} 个无效事件 (含 ${r.deleted_evidence_dirs} 个证据目录)`
+    );
+    await refresh();
+  } catch (e) {
+    ElMessage.error(String(e));
+  }
+}
+
+const videoEl = computed(() => videoRef.value);
+
+async function toggleFullscreen() {
+  const v = videoEl.value;
+  if (!v) return;
+  if (document.fullscreenElement === v) {
+    await document.exitFullscreen();
+  } else {
+    await v.requestFullscreen();
   }
 }
 
@@ -390,6 +420,9 @@ function snapshotSrc(e: ParkingEvent): string | null {
           <el-option label="按 IoU 高优先" value="iou" />
         </el-select>
         <el-button @click="refresh">刷新</el-button>
+        <el-button type="warning" plain @click="cleanupInvalid">
+          清理无效事件
+        </el-button>
         <el-tag>{{ filtered.length }} / {{ events.length }}</el-tag>
       </div>
 
@@ -441,19 +474,43 @@ function snapshotSrc(e: ParkingEvent): string | null {
         <div class="detail">
           <el-empty v-if="!selected" description="请从左侧选择一个事件" />
           <template v-else>
-            <div class="video-wrap">
-              <video
-                v-if="videoSrc(selected)"
-                ref="videoRef"
-                :src="videoSrc(selected)!"
-                autoplay
-                loop
-                muted
-                controls
-                @loadedmetadata="onVideoMeta"
-              />
-              <div v-else class="no-video">该事件没有证据视频</div>
-              <canvas ref="canvasRef" class="overlay" />
+            <!-- 视频 + 截图并排, 各 50% -->
+            <div class="media-row">
+              <div class="media-block video-block">
+                <video
+                  v-if="videoSrc(selected)"
+                  ref="videoRef"
+                  :src="videoSrc(selected)!"
+                  autoplay
+                  loop
+                  muted
+                  controls
+                  @loadedmetadata="onVideoMeta"
+                />
+                <div v-else class="no-media">该事件没有证据视频</div>
+                <canvas ref="canvasRef" class="overlay" />
+                <el-button
+                  v-if="videoSrc(selected)"
+                  class="fullscreen-btn"
+                  size="small"
+                  @click="toggleFullscreen"
+                >
+                  全屏
+                </el-button>
+              </div>
+              <div class="media-block snapshot-block">
+                <el-image
+                  v-if="snapshotSrc(selected)"
+                  :src="snapshotSrc(selected)!"
+                  :preview-src-list="[snapshotSrc(selected)!]"
+                  :initial-index="0"
+                  fit="contain"
+                  hide-on-click-modal
+                  preview-teleported
+                  class="snapshot-img"
+                />
+                <div v-else class="no-media">该事件没有截图</div>
+              </div>
             </div>
 
             <el-descriptions :column="2" border class="info">
@@ -637,15 +694,22 @@ h2 {
   overflow-y: auto;
 }
 
-.video-wrap {
+.media-row {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+}
+
+.media-block {
   position: relative;
   width: 100%;
   background: #000;
-  border-radius: 4px;
+  border-radius: 6px;
   aspect-ratio: 16 / 9;
+  overflow: hidden;
 }
 
-.video-wrap video {
+.video-block video {
   position: absolute;
   inset: 0;
   width: 100%;
@@ -653,18 +717,43 @@ h2 {
   object-fit: contain;
 }
 
-.video-wrap .overlay {
+.video-block .overlay {
   position: absolute;
   inset: 0;
   pointer-events: none;
 }
 
-.no-video {
+.fullscreen-btn {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  z-index: 5;
+}
+
+.snapshot-block {
+  cursor: zoom-in;
+}
+
+.snapshot-img {
+  width: 100%;
+  height: 100%;
+  display: block;
+}
+
+.snapshot-img :deep(img) {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  display: block;
+}
+
+.no-media {
   display: flex;
   align-items: center;
   justify-content: center;
   color: #fff;
   height: 100%;
+  font-size: 13px;
 }
 
 .plate-edit {

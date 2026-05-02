@@ -440,7 +440,8 @@ async fn process_one_job(
                 total: total_frames,
             },
         );
-        let mut events = aggregate_events(&path_s3, &all, event_time_base, 60_000);
+        let min_plate_conf = read_min_plate_conf().unwrap_or(0.6);
+        let mut events = aggregate_events(&path_s3, &all, event_time_base, 60_000, min_plate_conf);
         let events_count = events.len() as u32;
 
         // P3: 给每个事件生成证据包 (截图 + 6s 视频 + 信息.txt)
@@ -582,6 +583,13 @@ fn infer_one_frame(extracted: ExtractedFrame) -> Result<FrameObservation> {
         height: extracted.image.height(),
         vehicles,
     })
+}
+
+/// 从 settings 读 plate_conf_threshold
+fn read_min_plate_conf() -> Option<f32> {
+    let lock = crate::db::conn().ok()?;
+    let conn = lock.lock().ok()?;
+    crate::db::settings::load(&conn).ok().map(|s| s.plate_conf_threshold)
 }
 
 // ========== DB 状态封装 (内部用) ==========

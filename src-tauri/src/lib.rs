@@ -107,6 +107,7 @@ pub fn run() {
             commands::video::update_event_status,
             commands::video::update_event_plate,
             commands::video::mark_event_uploaded,
+            commands::video::cleanup_invalid_events,
             commands::pipeline::start_batch_pipeline,
             commands::pipeline::resume_pending_jobs,
             commands::pipeline::list_jobs,
