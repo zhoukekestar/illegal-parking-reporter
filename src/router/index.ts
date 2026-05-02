@@ -37,6 +37,12 @@ const routes: RouteRecordRaw[] = [
     meta: { title: "审核 (P4)", icon: "View" },
   },
   {
+    path: "/export",
+    name: "export",
+    component: () => import("@/views/ExportView.vue"),
+    meta: { title: "导出 (P5)", icon: "Download" },
+  },
+  {
     path: "/events",
     name: "events",
     component: () => import("@/views/EventsView.vue"),

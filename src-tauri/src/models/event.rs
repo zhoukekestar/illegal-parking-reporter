@@ -75,6 +75,10 @@ pub struct ParkingEvent {
     pub iou_score: Option<f32>,
     pub snapshot_path: Option<String>,
     pub clip_path: Option<String>,
+    /// P5: 导出到证据包的时间, ISO 8601
+    pub exported_at: Option<String>,
+    /// P5: 导出后该事件子文件夹在目标目录中的绝对路径
+    pub export_path: Option<String>,
 }
 
 impl ParkingEvent {

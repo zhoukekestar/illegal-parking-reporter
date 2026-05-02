@@ -6,7 +6,7 @@
 use anyhow::Result;
 use rusqlite::Connection;
 
-const SCHEMA_VERSION: i32 = 2;
+const SCHEMA_VERSION: i32 = 3;
 
 pub fn run_migrations(conn: &Connection) -> Result<()> {
     conn.execute(
@@ -34,6 +34,10 @@ pub fn run_migrations(conn: &Connection) -> Result<()> {
     if current < 2 {
         conn.execute_batch(SCHEMA_V2)?;
         tracing::info!("schema 升级到 v2 (video_jobs)");
+    }
+    if current < 3 {
+        conn.execute_batch(SCHEMA_V3)?;
+        tracing::info!("schema 升级到 v3 (events.exported_*)");
     }
 
     if current < SCHEMA_VERSION {
@@ -91,4 +95,10 @@ CREATE TABLE IF NOT EXISTS video_jobs (
 CREATE INDEX IF NOT EXISTS idx_jobs_batch ON video_jobs(batch_id);
 CREATE INDEX IF NOT EXISTS idx_jobs_status ON video_jobs(status);
 CREATE INDEX IF NOT EXISTS idx_jobs_video ON video_jobs(source_video);
+"#;
+
+const SCHEMA_V3: &str = r#"
+ALTER TABLE events ADD COLUMN exported_at TEXT;
+ALTER TABLE events ADD COLUMN export_path TEXT;
+CREATE INDEX IF NOT EXISTS idx_events_exported_at ON events(exported_at);
 "#;

@@ -12,9 +12,9 @@ pub fn upsert_event(conn: &Connection, e: &ParkingEvent) -> Result<()> {
             id, source_video, representative_frame_index, timestamp_ms, event_time,
             plate_number, plate_confidence, plate_manual_corrected, vehicle_class,
             vehicle_bbox_json, first_seen_ms, last_seen_ms, frame_hits, review_status,
-            iou_score, snapshot_path, clip_path
+            iou_score, snapshot_path, clip_path, exported_at, export_path
         ) VALUES (
-            ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17
+            ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19
         )
         ON CONFLICT(id) DO UPDATE SET
             source_video = excluded.source_video,
@@ -32,7 +32,9 @@ pub fn upsert_event(conn: &Connection, e: &ParkingEvent) -> Result<()> {
             review_status = excluded.review_status,
             iou_score = excluded.iou_score,
             snapshot_path = excluded.snapshot_path,
-            clip_path = excluded.clip_path"#,
+            clip_path = excluded.clip_path,
+            exported_at = excluded.exported_at,
+            export_path = excluded.export_path"#,
         params![
             e.id,
             e.source_video,
@@ -51,6 +53,8 @@ pub fn upsert_event(conn: &Connection, e: &ParkingEvent) -> Result<()> {
             e.iou_score,
             e.snapshot_path,
             e.clip_path,
+            e.exported_at,
+            e.export_path,
         ],
     )?;
     Ok(())
@@ -70,7 +74,7 @@ pub fn list_all(conn: &Connection) -> Result<Vec<ParkingEvent>> {
         r#"SELECT id, source_video, representative_frame_index, timestamp_ms, event_time,
                   plate_number, plate_confidence, plate_manual_corrected, vehicle_class,
                   vehicle_bbox_json, first_seen_ms, last_seen_ms, frame_hits, review_status,
-                  iou_score, snapshot_path, clip_path
+                  iou_score, snapshot_path, clip_path, exported_at, export_path
            FROM events
            ORDER BY timestamp_ms DESC, id"#,
     )?;
@@ -117,7 +121,7 @@ pub fn list_by_source_video(conn: &Connection, source_video: &str) -> Result<Vec
         r#"SELECT id, source_video, representative_frame_index, timestamp_ms, event_time,
                   plate_number, plate_confidence, plate_manual_corrected, vehicle_class,
                   vehicle_bbox_json, first_seen_ms, last_seen_ms, frame_hits, review_status,
-                  iou_score, snapshot_path, clip_path
+                  iou_score, snapshot_path, clip_path, exported_at, export_path
            FROM events
            WHERE source_video = ?1
            ORDER BY timestamp_ms"#,
@@ -155,7 +159,25 @@ fn row_to_event(r: &Row<'_>) -> rusqlite::Result<ParkingEvent> {
         iou_score: r.get::<_, Option<f64>>(14)?.map(|v| v as f32),
         snapshot_path: r.get(15)?,
         clip_path: r.get(16)?,
+        exported_at: r.get(17)?,
+        export_path: r.get(18)?,
     })
+}
+
+/// 标记事件已导出到目标 (P5)
+pub fn mark_exported(
+    conn: &Connection,
+    event_ids: &[String],
+    export_path: &str,
+    timestamp: &str,
+) -> Result<()> {
+    for id in event_ids {
+        conn.execute(
+            "UPDATE events SET exported_at = ?1, export_path = ?2 WHERE id = ?3",
+            params![timestamp, export_path, id],
+        )?;
+    }
+    Ok(())
 }
 
 #[cfg(test)]
@@ -182,6 +204,8 @@ mod tests {
             iou_score: None,
             snapshot_path: None,
             clip_path: None,
+            exported_at: None,
+            export_path: None,
         }
     }
 

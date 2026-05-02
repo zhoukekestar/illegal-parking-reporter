@@ -147,6 +147,8 @@ fn build_event(
         iou_score: representative.vehicle.iou_score,
         snapshot_path: None,
         clip_path: None,
+        exported_at: None,
+        export_path: None,
     }
 }
 

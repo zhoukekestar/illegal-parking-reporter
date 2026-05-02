@@ -9,6 +9,9 @@
 // P5 会在此之上加索引 CSV + 上传指引 PDF + 顶层"违停举报包_YYYY-MM-DD_HH-MM"
 
 pub mod builder;
+pub mod csv_index;
+pub mod exporter;
+pub mod html_guide;
 
 use std::path::PathBuf;
 

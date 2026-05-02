@@ -2,6 +2,7 @@
 // 业务逻辑放在 ai/ video/ 等领域模块, 命令层保持薄
 
 pub mod detection;
+pub mod export;
 pub mod pipeline;
 pub mod system;
 pub mod video;

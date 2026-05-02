@@ -72,6 +72,7 @@ pub fn run() {
             commands::pipeline::resume_pending_jobs,
             commands::pipeline::list_jobs,
             commands::pipeline::list_pending_jobs,
+            commands::export::export_accepted_events,
         ])
         .run(tauri::generate_context!())
         .expect("启动 Tauri 应用失败");

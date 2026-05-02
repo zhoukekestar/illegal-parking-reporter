@@ -58,6 +58,8 @@ export interface ParkingEvent {
   iou_score: number | null;
   snapshot_path: string | null;
   clip_path: string | null;
+  exported_at: string | null;
+  export_path: string | null;
 }
 
 export interface ProcessOutcome {
@@ -94,4 +96,24 @@ export async function updateEventPlate(
   corrected: string | null
 ): Promise<void> {
   await invoke("update_event_plate", { eventId, corrected });
+}
+
+export interface SkipReason {
+  event_id: string;
+  reason: string;
+}
+
+export interface ExportSummary {
+  bundle_path: string;
+  exported_count: number;
+  skipped: SkipReason[];
+  index_csv: string;
+  guide_html: string;
+}
+
+export async function exportAcceptedEvents(
+  eventIds: string[],
+  targetDir: string
+): Promise<ExportSummary> {
+  return invoke<ExportSummary>("export_accepted_events", { eventIds, targetDir });
 }
