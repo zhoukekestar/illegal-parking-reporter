@@ -55,6 +55,12 @@ const routes: RouteRecordRaw[] = [
     meta: { title: "设置", icon: "Setting" },
   },
   {
+    path: "/upload-helper",
+    name: "upload-helper",
+    component: () => import("@/views/UploadHelperView.vue"),
+    meta: { title: "上传助手 (P8.1)", icon: "Upload" },
+  },
+  {
     path: "/about",
     name: "about",
     component: () => import("@/views/AboutView.vue"),

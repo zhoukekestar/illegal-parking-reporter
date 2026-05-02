@@ -39,6 +39,10 @@ export interface FrameObservation {
   vehicles: VehicleObservation[];
 }
 
+export async function markEventUploaded(eventId: string): Promise<void> {
+  await invoke("mark_event_uploaded", { eventId });
+}
+
 /** 单个违停事件 (聚合后) */
 export interface ParkingEvent {
   id: string;
@@ -60,6 +64,7 @@ export interface ParkingEvent {
   clip_path: string | null;
   exported_at: string | null;
   export_path: string | null;
+  uploaded_at: string | null;
 }
 
 export interface ProcessOutcome {

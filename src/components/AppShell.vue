@@ -21,6 +21,7 @@ const items: MenuItem[] = [
   { path: "/processing", title: "批量处理 (P2)" },
   { path: "/review", title: "审核 (P4)" },
   { path: "/export", title: "导出 (P5)" },
+  { path: "/upload-helper", title: "上传助手 (P8.1)" },
   { path: "/events", title: "事件列表" },
   { path: "/process", title: "单视频调试 (P1)" },
   { path: "/detect", title: "图片检测 (P0)" },

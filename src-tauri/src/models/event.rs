@@ -79,6 +79,8 @@ pub struct ParkingEvent {
     pub exported_at: Option<String>,
     /// P5: 导出后该事件子文件夹在目标目录中的绝对路径
     pub export_path: Option<String>,
+    /// P8.1: 用户在剪贴板助手中标记 "已上传" 的时间, ISO 8601
+    pub uploaded_at: Option<String>,
 }
 
 impl ParkingEvent {

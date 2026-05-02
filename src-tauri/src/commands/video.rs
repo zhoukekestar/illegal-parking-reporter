@@ -106,6 +106,19 @@ pub async fn update_event_plate(
     .map_err(|e| format!("更新车牌失败: {e:#}"))
 }
 
+/// P8.1: 标记事件为"已上传"
+#[tauri::command]
+pub async fn mark_event_uploaded(event_id: String) -> Result<(), String> {
+    tokio::task::spawn_blocking(move || -> anyhow::Result<()> {
+        let lock = crate::db::conn()?;
+        let conn = lock.lock().map_err(|e| anyhow::anyhow!("DB mutex 中毒: {e}"))?;
+        crate::db::events::mark_uploaded(&conn, &event_id)
+    })
+    .await
+    .map_err(|e| format!("blocking task panic: {e}"))?
+    .map_err(|e| format!("标记上传失败: {e:#}"))
+}
+
 /// 单图车牌检测 + 识别 (MVU 5 demo)
 #[tauri::command]
 pub async fn detect_plate_demo(image_path: String) -> Result<Vec<crate::models::observation::PlateReading>, String> {

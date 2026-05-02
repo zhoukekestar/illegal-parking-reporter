@@ -63,6 +63,7 @@ pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_fs::init())
+        .plugin(tauri_plugin_clipboard_manager::init())
         .invoke_handler(tauri::generate_handler![
             commands::system::check_system_status,
             commands::system::open_in_file_manager,
@@ -73,6 +74,7 @@ pub fn run() {
             commands::video::detect_plate_demo,
             commands::video::update_event_status,
             commands::video::update_event_plate,
+            commands::video::mark_event_uploaded,
             commands::pipeline::start_batch_pipeline,
             commands::pipeline::resume_pending_jobs,
             commands::pipeline::list_jobs,

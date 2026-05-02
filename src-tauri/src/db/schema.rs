@@ -6,7 +6,7 @@
 use anyhow::Result;
 use rusqlite::Connection;
 
-const SCHEMA_VERSION: i32 = 4;
+const SCHEMA_VERSION: i32 = 5;
 
 pub fn run_migrations(conn: &Connection) -> Result<()> {
     conn.execute(
@@ -42,6 +42,12 @@ pub fn run_migrations(conn: &Connection) -> Result<()> {
     if current < 4 {
         crate::db::settings::ensure_schema(conn)?;
         tracing::info!("schema 升级到 v4 (settings)");
+    }
+    if current < 5 {
+        // ALTER TABLE 在 ATTACH 早期添加列, IF NOT EXISTS 不在所有 SQLite 版本可用
+        // 用 try-and-ignore: 列已存在会报错, 忽略
+        let _ = conn.execute_batch("ALTER TABLE events ADD COLUMN uploaded_at TEXT;");
+        tracing::info!("schema 升级到 v5 (events.uploaded_at)");
     }
 
     if current < SCHEMA_VERSION {

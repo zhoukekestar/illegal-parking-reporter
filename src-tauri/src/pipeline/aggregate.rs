@@ -149,6 +149,7 @@ fn build_event(
         clip_path: None,
         exported_at: None,
         export_path: None,
+        uploaded_at: None,
     }
 }
 

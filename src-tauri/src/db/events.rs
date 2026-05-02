@@ -12,9 +12,9 @@ pub fn upsert_event(conn: &Connection, e: &ParkingEvent) -> Result<()> {
             id, source_video, representative_frame_index, timestamp_ms, event_time,
             plate_number, plate_confidence, plate_manual_corrected, vehicle_class,
             vehicle_bbox_json, first_seen_ms, last_seen_ms, frame_hits, review_status,
-            iou_score, snapshot_path, clip_path, exported_at, export_path
+            iou_score, snapshot_path, clip_path, exported_at, export_path, uploaded_at
         ) VALUES (
-            ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19
+            ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20
         )
         ON CONFLICT(id) DO UPDATE SET
             source_video = excluded.source_video,
@@ -34,7 +34,8 @@ pub fn upsert_event(conn: &Connection, e: &ParkingEvent) -> Result<()> {
             snapshot_path = excluded.snapshot_path,
             clip_path = excluded.clip_path,
             exported_at = excluded.exported_at,
-            export_path = excluded.export_path"#,
+            export_path = excluded.export_path,
+            uploaded_at = excluded.uploaded_at"#,
         params![
             e.id,
             e.source_video,
@@ -55,6 +56,7 @@ pub fn upsert_event(conn: &Connection, e: &ParkingEvent) -> Result<()> {
             e.clip_path,
             e.exported_at,
             e.export_path,
+            e.uploaded_at,
         ],
     )?;
     Ok(())
@@ -74,7 +76,7 @@ pub fn list_all(conn: &Connection) -> Result<Vec<ParkingEvent>> {
         r#"SELECT id, source_video, representative_frame_index, timestamp_ms, event_time,
                   plate_number, plate_confidence, plate_manual_corrected, vehicle_class,
                   vehicle_bbox_json, first_seen_ms, last_seen_ms, frame_hits, review_status,
-                  iou_score, snapshot_path, clip_path, exported_at, export_path
+                  iou_score, snapshot_path, clip_path, exported_at, export_path, uploaded_at
            FROM events
            ORDER BY timestamp_ms DESC, id"#,
     )?;
@@ -121,7 +123,7 @@ pub fn list_by_source_video(conn: &Connection, source_video: &str) -> Result<Vec
         r#"SELECT id, source_video, representative_frame_index, timestamp_ms, event_time,
                   plate_number, plate_confidence, plate_manual_corrected, vehicle_class,
                   vehicle_bbox_json, first_seen_ms, last_seen_ms, frame_hits, review_status,
-                  iou_score, snapshot_path, clip_path, exported_at, export_path
+                  iou_score, snapshot_path, clip_path, exported_at, export_path, uploaded_at
            FROM events
            WHERE source_video = ?1
            ORDER BY timestamp_ms"#,
@@ -161,7 +163,21 @@ fn row_to_event(r: &Row<'_>) -> rusqlite::Result<ParkingEvent> {
         clip_path: r.get(16)?,
         exported_at: r.get(17)?,
         export_path: r.get(18)?,
+        uploaded_at: r.get(19)?,
     })
+}
+
+/// P8.1: 标记事件已通过剪贴板助手上传
+pub fn mark_uploaded(conn: &Connection, event_id: &str) -> Result<()> {
+    let now = chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Secs, true);
+    let n = conn.execute(
+        "UPDATE events SET uploaded_at = ?1 WHERE id = ?2",
+        params![now, event_id],
+    )?;
+    if n == 0 {
+        anyhow::bail!("找不到事件 id={event_id}");
+    }
+    Ok(())
 }
 
 /// 标记事件已导出到目标 (P5)
@@ -206,6 +222,7 @@ mod tests {
             clip_path: None,
             exported_at: None,
             export_path: None,
+            uploaded_at: None,
         }
     }
 
