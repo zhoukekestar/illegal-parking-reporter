@@ -122,9 +122,31 @@ pub fn run() {
             commands::diag::export_diagnostic,
         ])
         .setup(|app| {
-            // P7: 后台预热 YOLOv8, 让首次推理更快
-            // 必须放在 tokio runtime 内, Tauri 的 setup 已是 runtime 内
-            let _app = app;
+            use tauri::Manager;
+
+            // 动态注册 asset 协议 scope: webview 通过 convertFileSrc 加载
+            // evidence 目录下的 截图.jpg / 视频.mp4 (P3 起需要)
+            //
+            // 静态 scope (tauri.conf.json) 用 glob 写, 但实际路径含 src-tauri 中间段,
+            // glob 容易写漏; 运行时 allow_directory 直接吃绝对路径更稳
+            match crate::evidence::evidence_root() {
+                Ok(root) => {
+                    let scope = app.asset_protocol_scope();
+                    match scope.allow_directory(&root, true) {
+                        Ok(_) => tracing::info!(
+                            ?root,
+                            "已注册 evidence 根目录到 asset 协议 scope (递归)"
+                        ),
+                        Err(e) => tracing::error!(
+                            error = %e,
+                            ?root,
+                            "asset_protocol_scope.allow_directory 失败"
+                        ),
+                    }
+                }
+                Err(e) => tracing::error!(error = %e, "无法取得 evidence_root"),
+            }
+
             diagnostic::spawn_warmup();
             Ok(())
         })
