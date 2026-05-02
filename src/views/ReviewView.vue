@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, computed, onMounted, watch, nextTick } from "vue";
+import { ref, computed, onMounted, onUnmounted, watch, nextTick } from "vue";
 import { convertFileSrc } from "@tauri-apps/api/core";
 import { ElMessage, ElMessageBox } from "element-plus";
 
@@ -43,6 +43,12 @@ onMounted(async () => {
   if (filtered.value.length) {
     selectEvent(filtered.value[0].id);
   }
+  // 监听 ESC 退出伪全屏 (capture 阶段, 比 useReviewShortcuts 优先)
+  window.addEventListener("keydown", onGlobalKey, true);
+});
+
+onUnmounted(() => {
+  window.removeEventListener("keydown", onGlobalKey, true);
 });
 
 async function refresh() {
@@ -74,15 +80,30 @@ async function cleanupInvalid() {
   }
 }
 
-const videoEl = computed(() => videoRef.value);
+// CSS 伪全屏 (避开 WKWebView 的 fullscreen API 兼容问题)
+//   - WKWebView 不支持标准 v.requestFullscreen()
+//   - webkit*Fullscreen 行为不一致, 还要 webview prefs 配合
+//   - 直接用 position:fixed inset:0 把元素铺满 webview 区域, 100% 兼容
+//   - ESC 键退出 (额外监听, 不走系统 fullscreenchange 事件)
+const videoFullscreen = ref(false);
+const snapshotFullscreen = ref(false);
 
-async function toggleFullscreen() {
-  const v = videoEl.value;
-  if (!v) return;
-  if (document.fullscreenElement === v) {
-    await document.exitFullscreen();
-  } else {
-    await v.requestFullscreen();
+function toggleVideoFullscreen() {
+  if (snapshotFullscreen.value) snapshotFullscreen.value = false;
+  videoFullscreen.value = !videoFullscreen.value;
+}
+
+function toggleSnapshotFullscreen() {
+  if (videoFullscreen.value) videoFullscreen.value = false;
+  snapshotFullscreen.value = !snapshotFullscreen.value;
+}
+
+function onGlobalKey(e: KeyboardEvent) {
+  if (e.key === "Escape" && (videoFullscreen.value || snapshotFullscreen.value)) {
+    e.preventDefault();
+    e.stopPropagation();
+    videoFullscreen.value = false;
+    snapshotFullscreen.value = false;
   }
 }
 
@@ -474,9 +495,12 @@ function snapshotSrc(e: ParkingEvent): string | null {
         <div class="detail">
           <el-empty v-if="!selected" description="请从左侧选择一个事件" />
           <template v-else>
-            <!-- 视频 + 截图并排, 各 50% -->
+            <!-- 视频 + 截图并排, 各 50%; 任一可点"放大"切换 CSS 伪全屏 -->
             <div class="media-row">
-              <div class="media-block video-block">
+              <div
+                class="media-block video-block"
+                :class="{ 'pseudo-fullscreen': videoFullscreen }"
+              >
                 <video
                   v-if="videoSrc(selected)"
                   ref="videoRef"
@@ -488,28 +512,42 @@ function snapshotSrc(e: ParkingEvent): string | null {
                   @loadedmetadata="onVideoMeta"
                 />
                 <div v-else class="no-media">该事件没有证据视频</div>
-                <canvas ref="canvasRef" class="overlay" />
+                <canvas
+                  ref="canvasRef"
+                  class="overlay"
+                  v-show="!videoFullscreen"
+                />
                 <el-button
                   v-if="videoSrc(selected)"
-                  class="fullscreen-btn"
+                  class="zoom-btn"
                   size="small"
-                  @click="toggleFullscreen"
+                  type="primary"
+                  @click="toggleVideoFullscreen"
                 >
-                  全屏
+                  {{ videoFullscreen ? "退出 (Esc)" : "放大" }}
                 </el-button>
               </div>
-              <div class="media-block snapshot-block">
-                <el-image
+              <div
+                class="media-block snapshot-block"
+                :class="{ 'pseudo-fullscreen': snapshotFullscreen }"
+                @click="snapshotSrc(selected) && toggleSnapshotFullscreen()"
+              >
+                <img
                   v-if="snapshotSrc(selected)"
                   :src="snapshotSrc(selected)!"
-                  :preview-src-list="[snapshotSrc(selected)!]"
-                  :initial-index="0"
-                  fit="contain"
-                  hide-on-click-modal
-                  preview-teleported
+                  alt="截图"
                   class="snapshot-img"
                 />
                 <div v-else class="no-media">该事件没有截图</div>
+                <el-button
+                  v-if="snapshotSrc(selected)"
+                  class="zoom-btn"
+                  size="small"
+                  type="primary"
+                  @click.stop="toggleSnapshotFullscreen"
+                >
+                  {{ snapshotFullscreen ? "退出 (Esc)" : "放大" }}
+                </el-button>
               </div>
             </div>
 
@@ -723,11 +761,12 @@ h2 {
   pointer-events: none;
 }
 
-.fullscreen-btn {
+.zoom-btn {
   position: absolute;
   top: 8px;
   right: 8px;
   z-index: 5;
+  opacity: 0.85;
 }
 
 .snapshot-block {
@@ -737,14 +776,34 @@ h2 {
 .snapshot-img {
   width: 100%;
   height: 100%;
+  object-fit: contain;
   display: block;
 }
 
-.snapshot-img :deep(img) {
-  width: 100%;
-  height: 100%;
+/* CSS 伪全屏: 把 .media-block 拉到整个 webview, 不依赖系统 fullscreen API */
+.media-block.pseudo-fullscreen {
+  position: fixed !important;
+  inset: 0 !important;
+  z-index: 9999;
+  border-radius: 0;
+  aspect-ratio: unset;
+  background: rgba(0, 0, 0, 0.95);
+  cursor: default;
+}
+
+.media-block.pseudo-fullscreen video,
+.media-block.pseudo-fullscreen .snapshot-img {
+  position: absolute;
+  inset: 0;
+  width: 100% !important;
+  height: 100% !important;
   object-fit: contain;
-  display: block;
+}
+
+.media-block.pseudo-fullscreen .zoom-btn {
+  top: 16px;
+  right: 16px;
+  opacity: 1;
 }
 
 .no-media {
