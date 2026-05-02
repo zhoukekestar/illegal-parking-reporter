@@ -1,44 +1,39 @@
 // 路况记录助手 - Rust 后端入口
 //
-// 当前阶段: P6 (本地登录 + 设置 + SQLCipher 加密)
+// 当前阶段: P7 (打磨 / 性能 / 诊断)
 
 pub mod ai;
 pub mod auth;
 pub mod commands;
 pub mod db;
+pub mod diagnostic;
 pub mod evidence;
 pub mod models;
 pub mod pipeline;
 pub mod video;
 
-use tracing_subscriber::EnvFilter;
-
-fn init_logging() {
-    let filter = EnvFilter::try_from_default_env().unwrap_or_else(|_| {
-        EnvFilter::new("info,illegal_parking_reporter_lib=debug,ort=info")
-    });
-    let _ = tracing_subscriber::fmt()
-        .with_env_filter(filter)
-        .with_target(true)
-        .try_init();
-}
-
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
-    init_logging();
+    // P7: 日志同时写文件 (guard 必须保持存活直到进程退出)
+    let _log_guard = match diagnostic::init_logging_with_file() {
+        Ok(g) => Some(g),
+        Err(e) => {
+            eprintln!("初始化日志文件 sink 失败: {e:#}, 退化到 stderr");
+            None
+        }
+    };
     tracing::info!(version = env!("CARGO_PKG_VERSION"), "路况记录助手启动");
 
-    // 初始化 ffmpeg
     if let Err(e) = video::init() {
-        tracing::error!(error = %e, "ffmpeg 初始化失败, 视频功能将不可用");
+        tracing::error!(error = %e, "ffmpeg 初始化失败");
     }
 
-    // 加载/初始化 auth.json + 派生 SQLCipher key (无密码时用 secret 直接做 key)
+    // 加载/初始化 auth.json + 派生 SQLCipher key
     let cipher_key_hex = match auth::load_or_init() {
         Ok(a) => match auth::derive_sqlcipher_key(&a, None) {
             Ok(k) => Some(k),
             Err(e) => {
-                tracing::error!(error = %e, "派生 SQLCipher key 失败, 退化为 plain DB");
+                tracing::error!(error = %e, "派生 SQLCipher key 失败");
                 None
             }
         },
@@ -60,7 +55,7 @@ pub fn run() {
 
     if std::env::var("ORT_DYLIB_PATH").is_err() {
         tracing::warn!(
-            "ORT_DYLIB_PATH 未设置, ort 加载会失败. \
+            "ORT_DYLIB_PATH 未设置. \
              export ORT_DYLIB_PATH=/opt/homebrew/lib/libonnxruntime.dylib"
         );
     }
@@ -90,7 +85,15 @@ pub fn run() {
             commands::auth::get_settings,
             commands::auth::save_settings,
             commands::auth::purge_data,
+            commands::diag::export_diagnostic,
         ])
+        .setup(|app| {
+            // P7: 后台预热 YOLOv8, 让首次推理更快
+            // 必须放在 tokio runtime 内, Tauri 的 setup 已是 runtime 内
+            let _app = app;
+            diagnostic::spawn_warmup();
+            Ok(())
+        })
         .run(tauri::generate_context!())
         .expect("启动 Tauri 应用失败");
 }

@@ -31,6 +31,10 @@ thiserror = "2"
 # 日志
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+tracing-appender = "0.2"
+
+# zip (P7 诊断包)
+zip = { version = "2", default-features = false, features = ["deflate"] }
 
 # 异步运行时 (Tauri 已内置, 但显式声明便于其他模块用)
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "sync", "time"] }

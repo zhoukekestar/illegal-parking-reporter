@@ -3,6 +3,7 @@
 
 pub mod auth;
 pub mod detection;
+pub mod diag;
 pub mod export;
 pub mod pipeline;
 pub mod system;

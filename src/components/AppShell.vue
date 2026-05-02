@@ -25,6 +25,7 @@ const items: MenuItem[] = [
   { path: "/process", title: "单视频调试 (P1)" },
   { path: "/detect", title: "图片检测 (P0)" },
   { path: "/settings", title: "设置" },
+  { path: "/about", title: "关于" },
 ];
 
 function go(path: string) {

@@ -54,6 +54,12 @@ const routes: RouteRecordRaw[] = [
     component: () => import("@/views/SettingsView.vue"),
     meta: { title: "设置", icon: "Setting" },
   },
+  {
+    path: "/about",
+    name: "about",
+    component: () => import("@/views/AboutView.vue"),
+    meta: { title: "关于", icon: "InfoFilled" },
+  },
 ];
 
 export const router = createRouter({
