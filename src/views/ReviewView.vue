@@ -138,10 +138,135 @@ const plateOccurrences = computed(() => {
   return map;
 });
 
+// ========== 分组: 视频 -> 相似车牌 -> 事件 ==========
+
+interface PlateGroup {
+  /** 用作 v-for key 与折叠 ID, 取代表事件 id */
+  key: string;
+  /** 代表车牌 (组内第一个事件的车牌) */
+  representative: string;
+  /** 组内出现过的所有车牌变体 */
+  variants: string[];
+  events: ParkingEvent[];
+}
+
+interface VideoGroup {
+  key: string;          // source_video 路径作 key
+  video: string;
+  totalCount: number;
+  plateGroups: PlateGroup[];
+}
+
+/** 两个车牌相似的判定: 长度相同 + 不同字符位数 ≤ 1
+ *  例: 浙A12345 / 浙A1Z345 -> 相似 (OCR 把 "2" 看成 "Z")
+ *  长度不同直接不相似 (蓝牌 vs 绿牌格式天然不同)
+ */
+function isSimilarPlate(a: string, b: string): boolean {
+  if (a === b) return true;
+  if (a.length !== b.length) return false;
+  let diff = 0;
+  for (let i = 0; i < a.length; i++) {
+    if (a[i] !== b[i]) {
+      diff++;
+      if (diff > 1) return false;
+    }
+  }
+  return diff <= 1;
+}
+
+function plateOf(e: ParkingEvent): string {
+  return e.plate_manual_corrected ?? e.plate_number;
+}
+
+function shortPath(p: string): string {
+  const parts = p.split(/[/\\]/);
+  return parts[parts.length - 1] || p;
+}
+
+const grouped = computed<VideoGroup[]>(() => {
+  // 一级: 按 source_video 分桶 (保持 filtered 内的顺序)
+  const videoMap = new Map<string, ParkingEvent[]>();
+  for (const e of filtered.value) {
+    if (!videoMap.has(e.source_video)) videoMap.set(e.source_video, []);
+    videoMap.get(e.source_video)!.push(e);
+  }
+  // 二级: 同视频内, 相似车牌归一组
+  const out: VideoGroup[] = [];
+  for (const [video, evts] of videoMap) {
+    const plateGroups: PlateGroup[] = [];
+    for (const e of evts) {
+      const plate = plateOf(e);
+      let g = plateGroups.find((x) => isSimilarPlate(plate, x.representative));
+      if (!g) {
+        g = {
+          key: e.id,
+          representative: plate,
+          variants: [plate],
+          events: [e],
+        };
+        plateGroups.push(g);
+      } else {
+        g.events.push(e);
+        if (!g.variants.includes(plate)) g.variants.push(plate);
+      }
+    }
+    out.push({
+      key: video,
+      video,
+      totalCount: evts.length,
+      plateGroups,
+    });
+  }
+  return out;
+});
+
+// ========== 折叠状态 ==========
+// 默认全部展开. 用 Set 存"已折叠"的 id (取反逻辑, 这样新数据进来默认展开)
+const collapsedVideos = ref<Set<string>>(new Set());
+const collapsedPlateGroups = ref<Set<string>>(new Set());
+
+function isVideoCollapsed(key: string) {
+  return collapsedVideos.value.has(key);
+}
+function togglevideo(key: string) {
+  if (collapsedVideos.value.has(key)) collapsedVideos.value.delete(key);
+  else collapsedVideos.value.add(key);
+  collapsedVideos.value = new Set(collapsedVideos.value); // 触发 reactivity
+}
+function isPlateCollapsed(key: string) {
+  return collapsedPlateGroups.value.has(key);
+}
+function togglePlateGroup(key: string) {
+  if (collapsedPlateGroups.value.has(key)) collapsedPlateGroups.value.delete(key);
+  else collapsedPlateGroups.value.add(key);
+  collapsedPlateGroups.value = new Set(collapsedPlateGroups.value);
+}
+
+/** 展开包含给定事件的视频组 + 车牌组, 用于选中后自动展开 */
+function ensureExpandedFor(eventId: string) {
+  for (const vg of grouped.value) {
+    for (const pg of vg.plateGroups) {
+      if (pg.events.some((e) => e.id === eventId)) {
+        if (collapsedVideos.value.has(vg.key)) {
+          collapsedVideos.value.delete(vg.key);
+          collapsedVideos.value = new Set(collapsedVideos.value);
+        }
+        if (collapsedPlateGroups.value.has(pg.key)) {
+          collapsedPlateGroups.value.delete(pg.key);
+          collapsedPlateGroups.value = new Set(collapsedPlateGroups.value);
+        }
+        return;
+      }
+    }
+  }
+}
+
 function selectEvent(id: string) {
   selectedId.value = id;
   const e = filtered.value.find((x) => x.id === id);
   editingPlate.value = e?.plate_manual_corrected ?? e?.plate_number ?? "";
+  // 自动展开包含此事件的视频组与车牌组
+  ensureExpandedFor(id);
   // 自动播放视频
   nextTick(() => {
     const v = videoRef.value;
@@ -358,11 +483,6 @@ function tagTypeForStatus(s: Status): "info" | "success" | "warning" | "danger" 
   }
 }
 
-function shortPath(p: string): string {
-  const parts = p.split(/[/\\]/);
-  return parts[parts.length - 1] || p;
-}
-
 function evidenceFolder(e: ParkingEvent): string | null {
   const p = e.snapshot_path ?? e.clip_path;
   if (!p) return null;
@@ -447,46 +567,83 @@ function snapshotSrc(e: ParkingEvent): string | null {
         <el-tag>{{ filtered.length }} / {{ events.length }}</el-tag>
       </div>
 
-      <!-- 主体: 列表 + 详情 -->
+      <!-- 主体: 列表 (按 视频 -> 相似车牌 两级分组) + 详情 -->
       <div class="layout">
         <div class="list">
           <el-empty v-if="!filtered.length" description="暂无事件" />
-          <div
-            v-for="e in filtered"
-            :key="e.id"
-            :data-event-id="e.id"
-            class="list-item"
-            :class="{ active: selectedId === e.id }"
-            @click="selectEvent(e.id)"
-          >
-            <img
-              v-if="snapshotSrc(e)"
-              :src="snapshotSrc(e)!"
-              class="thumb"
-              alt="thumb"
-            />
-            <div v-else class="thumb-empty">无截图</div>
-            <div class="meta">
-              <div class="meta-row">
-                <el-tag
-                  :type="e.plate_number === '<待确认>' ? 'warning' : 'primary'"
-                  size="small"
+          <div v-for="vg in grouped" :key="vg.key" class="video-group">
+            <div
+              class="video-header"
+              @click="togglevideo(vg.key)"
+            >
+              <span class="caret">{{ isVideoCollapsed(vg.key) ? "▶" : "▼" }}</span>
+              <span class="video-name" :title="vg.video">📹 {{ shortPath(vg.video) }}</span>
+              <span class="badge">{{ vg.totalCount }}</span>
+            </div>
+            <div v-show="!isVideoCollapsed(vg.key)" class="video-body">
+              <div
+                v-for="pg in vg.plateGroups"
+                :key="pg.key"
+                class="plate-group"
+              >
+                <div
+                  class="plate-header"
+                  @click="togglePlateGroup(pg.key)"
                 >
-                  {{ e.plate_manual_corrected ?? e.plate_number }}
-                </el-tag>
-                <el-tag size="small" :type="tagTypeForStatus(e.review_status)">
-                  {{ e.review_status }}
-                </el-tag>
-              </div>
-              <div class="meta-row sub">
-                <span>{{ shortPath(e.source_video) }}</span>
-              </div>
-              <div class="meta-row sub">
-                <span>conf {{ (e.plate_confidence * 100).toFixed(0) }}%</span>
-                <span v-if="e.iou_score !== null">IoU {{ (e.iou_score * 100).toFixed(0) }}%</span>
-                <span v-if="(plateOccurrences.get(e.plate_number) ?? 0) > 1" class="cross-video">
-                  跨 {{ plateOccurrences.get(e.plate_number) }} 视频
-                </span>
+                  <span class="caret">
+                    {{ isPlateCollapsed(pg.key) ? "▶" : "▼" }}
+                  </span>
+                  <el-tag size="small" type="primary" class="plate-tag">
+                    {{ pg.representative }}
+                  </el-tag>
+                  <span v-if="pg.variants.length > 1" class="variants" :title="pg.variants.join(' / ')">
+                    +{{ pg.variants.length - 1 }} 变体
+                  </span>
+                  <span class="badge">{{ pg.events.length }}</span>
+                </div>
+                <div v-show="!isPlateCollapsed(pg.key)">
+                  <div
+                    v-for="e in pg.events"
+                    :key="e.id"
+                    :data-event-id="e.id"
+                    class="list-item"
+                    :class="{ active: selectedId === e.id }"
+                    @click="selectEvent(e.id)"
+                  >
+                    <img
+                      v-if="snapshotSrc(e)"
+                      :src="snapshotSrc(e)!"
+                      class="thumb"
+                      alt="thumb"
+                    />
+                    <div v-else class="thumb-empty">无截图</div>
+                    <div class="meta">
+                      <div class="meta-row">
+                        <el-tag
+                          v-if="plateOf(e) !== pg.representative"
+                          size="small"
+                          type="warning"
+                        >
+                          {{ plateOf(e) }}
+                        </el-tag>
+                        <el-tag size="small" :type="tagTypeForStatus(e.review_status)">
+                          {{ e.review_status }}
+                        </el-tag>
+                      </div>
+                      <div class="meta-row sub">
+                        <span>conf {{ (e.plate_confidence * 100).toFixed(0) }}%</span>
+                        <span v-if="e.iou_score !== null">IoU {{ (e.iou_score * 100).toFixed(0) }}%</span>
+                        <span>{{ (e.timestamp_ms / 1000).toFixed(1) }}s</span>
+                        <span
+                          v-if="(plateOccurrences.get(e.plate_number) ?? 0) > 1"
+                          class="cross-video"
+                        >
+                          跨 {{ plateOccurrences.get(e.plate_number) }} 视频
+                        </span>
+                      </div>
+                    </div>
+                  </div>
+                </div>
               </div>
             </div>
           </div>
@@ -664,12 +821,86 @@ h2 {
   background: var(--el-bg-color-page);
 }
 
+/* 视频组头 */
+.video-group {
+  border-bottom: 2px solid var(--el-border-color-light);
+}
+.video-header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 10px;
+  background: var(--el-color-info-light-8);
+  cursor: pointer;
+  user-select: none;
+  font-size: 12px;
+  font-weight: 600;
+  position: sticky;
+  top: 0;
+  z-index: 2;
+}
+.video-header:hover {
+  background: var(--el-color-info-light-7);
+}
+.video-name {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--el-text-color-primary);
+}
+
+/* 车牌组头 */
+.plate-group {
+  border-bottom: 1px solid var(--el-border-color-lighter);
+}
+.plate-header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 10px 6px 18px;
+  background: var(--el-fill-color-light);
+  cursor: pointer;
+  user-select: none;
+  font-size: 12px;
+}
+.plate-header:hover {
+  background: var(--el-fill-color);
+}
+.plate-tag {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+.variants {
+  font-size: 11px;
+  color: var(--el-color-warning);
+  cursor: help;
+}
+
+.caret {
+  font-size: 10px;
+  color: var(--el-text-color-secondary);
+  width: 12px;
+  display: inline-block;
+}
+
+.badge {
+  margin-left: auto;
+  background: var(--el-color-primary);
+  color: #fff;
+  font-size: 10px;
+  padding: 1px 8px;
+  border-radius: 10px;
+  min-width: 20px;
+  text-align: center;
+}
+
+/* 单个事件项 (在 plate group 里) */
 .list-item {
   display: flex;
   gap: 8px;
-  padding: 8px;
-  border-bottom: 1px solid var(--el-border-color-lighter);
+  padding: 8px 8px 8px 28px;
   cursor: pointer;
+  border-bottom: 1px solid var(--el-border-color-lighter);
 }
 
 .list-item:hover {
